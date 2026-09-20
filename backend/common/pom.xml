@@ -12,7 +12,18 @@
     <groupId>com.github.gaohongf</groupId>
     <artifactId>common</artifactId>
     <version>${parent.version}</version>
-
+    <dependencies>
+        <dependency>
+            <groupId>com.lingyun</groupId>
+            <artifactId>rsm-mvc-spring-boot-starter</artifactId>
+            <version>${lingyun.version}</version>
+        </dependency>
+        <dependency>
+            <groupId>org.projectlombok</groupId>
+            <artifactId>lombok</artifactId>
+            <optional>true</optional>
+        </dependency>
+    </dependencies>
     <properties>
         <maven.compiler.source>${java.version}</maven.compiler.source>
         <maven.compiler.target>${java.version}</maven.compiler.target>

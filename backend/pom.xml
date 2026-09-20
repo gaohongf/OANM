@@ -13,6 +13,7 @@
         <spring-cloud-alibaba.version>2023.0.3.4</spring-cloud-alibaba.version>
         <project.build.sourceEncoding>UTF-8</project.build.sourceEncoding>
         <project.reporting.outputEncoding>UTF-8</project.reporting.outputEncoding>
+        <lingyun.version>1.0.1</lingyun.version>
         <maven.compiler.source>${java.version}</maven.compiler.source>
         <maven.compiler.target>${java.version}</maven.compiler.target>
     </properties>
@@ -20,6 +21,8 @@
     <modules>
         <module>common</module>
         <module>api-gateway</module>
+        <module>service-auth</module>
+        <module>service-work-order</module>
     </modules>
     <dependencyManagement>
         <dependencies>
