@@ -16,6 +16,9 @@
         <lingyun.version>1.0.1</lingyun.version>
         <maven.compiler.source>${java.version}</maven.compiler.source>
         <maven.compiler.target>${java.version}</maven.compiler.target>
+        <sa-token.version>1.46.0</sa-token.version>
+        <mybatis-plus.version>3.5.7</mybatis-plus.version>
+        <mysql-connector.version>8.4.0</mysql-connector.version>
     </properties>
     <packaging>pom</packaging>
     <modules>
@@ -24,6 +27,12 @@
         <module>service-auth</module>
         <module>service-work-order</module>
     </modules>
+    <dependencies>
+      <dependency>
+            <groupId>org.springframework.boot</groupId>
+            <artifactId>spring-boot-starter-data-redis</artifactId>
+        </dependency>
+    </dependencies>
     <dependencyManagement>
         <dependencies>
             <!-- Spring Boot依赖管理 -->

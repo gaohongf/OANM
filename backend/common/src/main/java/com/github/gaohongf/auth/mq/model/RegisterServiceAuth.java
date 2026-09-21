@@ -1,4 +1,4 @@
-package com.github.gaohongf.auth;
+package com.github.gaohongf.auth.mq.model;
 
 import java.util.List;
 

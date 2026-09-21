@@ -37,6 +37,11 @@
             <artifactId>common</artifactId>
             <version>${parent.version}</version>
         </dependency>
+        <dependency>
+            <groupId>cn.dev33</groupId>
+            <artifactId>sa-token-reactor-spring-boot3-starter</artifactId>
+            <version>${sa-token.version}</version>
+        </dependency>
     </dependencies>
     <properties>
         <maven.compiler.source>${java.version}</maven.compiler.source>
