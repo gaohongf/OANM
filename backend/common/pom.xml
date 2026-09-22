@@ -21,7 +21,6 @@
         <dependency>
             <groupId>org.projectlombok</groupId>
             <artifactId>lombok</artifactId>
-            <optional>true</optional>
         </dependency>
         <dependency>
             <groupId>com.baomidou</groupId>
@@ -33,6 +32,20 @@
             <artifactId>mysql-connector-j</artifactId>
             <version>${mysql-connector.version}</version>
             <scope>compile</scope>
+        </dependency>
+
+        <!--
+          说明: 引入完整 starter 而非 sa-token-core, 是为了让 StpUtil 在所有引用 common 的
+          模块中都有可用的 SaTokenContext (否则运行时取登录态会失败)。
+
+          common 只服务于业务模块 (service-*), 这些模块都是 Spring MVC 应用, 与本 starter 的
+          Servlet 体系一致。api-gateway 不含业务代码、不依赖 common, 如它自身需要 sa-token,
+          由该模块自行引入 sa-token-reactor-spring-boot3-starter。
+        -->
+        <dependency>
+            <groupId>cn.dev33</groupId>
+            <artifactId>sa-token-spring-boot3-starter</artifactId>
+            <version>${sa-token.version}</version>
         </dependency>
     </dependencies>
     <properties>

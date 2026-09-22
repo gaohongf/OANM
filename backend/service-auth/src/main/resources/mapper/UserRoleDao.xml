@@ -1,0 +1,20 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE mapper PUBLIC "-//mybatis.org//DTD Mapper 3.0//EN"
+        "http://mybatis.org/dtd/mybatis-3-mapper.dtd">
+<mapper namespace="com.github.gaohongf.auth.dao.UserRoleDao">
+
+    <!--
+      说明: 该表无独立主键, BaseMapper 的单条 CRUD 可用 (按条件), 批量新增 BaseMapper 不提供, 故自定义。
+      deleted / version 直接写死 0: 这两列在库中是 NOT NULL, 批量插入时不期望调用方逐个赋值。
+      审计字段沿用实体上的值, 若后续补了 MetaObjectHandler, 调用前记得先把字段填充好。
+    -->
+    <insert id="insertBatch">
+        INSERT INTO user_roles (user_id, role_name, create_by, create_time, update_by, update_time, deleted, version)
+        VALUES
+        <foreach collection="list" item="item" separator=",">
+            (#{item.userId}, #{item.roleName}, #{item.createBy}, #{item.createTime},
+             #{item.updateBy}, #{item.updateTime}, 0, 0)
+        </foreach>
+    </insert>
+
+</mapper>

@@ -1,0 +1,32 @@
+@host = http://localhost:8084
+# 创建用户
+POST {{host}}/auth/users
+Content-Type: application/json
+
+{
+  "username": "admin",
+  "password": "admin123"
+}
+
+
+
+
+
+###
+POST {{host}}/auth/users
+Content-Type: application/json
+
+{
+  "username": "2",
+  "password": "a"
+}
+
+
+###
+POST {{host}}/auth/acc/login
+Content-Type: application/json
+
+{
+  "username": "admin",
+  "password": "admin123"
+}

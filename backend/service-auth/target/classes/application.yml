@@ -5,7 +5,8 @@ spring:
   config:
     import:
       # 必须项：导入 Nacos 配置（optional: 前缀表示配置非必需，缺失时不报错）
-      - nacos:datasource-config-${spring.profiles.active}?group=DEFAULT_GROUP
+      - optional:nacos:datasource-config-${spring.profiles.active}?group=DEFAULT_GROUP
+      - optional:nacos:common-config-${spring.profiles.active}?group=DEFAULT_GROUP
       - optional:nacos:${spring.application.name}-${spring.profiles.active}?group=DEFAULT_GROUP
 
   application:
@@ -20,11 +21,3 @@ spring:
         server-addr: 127.0.0.1:8848
         file-extension: yaml
         namespace: ${NACOS_NAMESPACE:}
-sa-token:
-  token-name: satoken
-  timeout: 2592000
-  active-timeout: -1
-  is-concurrent: true
-  is-share: false
-  token-style: uuid
-  is-log: true
