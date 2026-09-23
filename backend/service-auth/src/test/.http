@@ -30,3 +30,7 @@ Content-Type: application/json
   "username": "admin",
   "password": "admin123"
 }
+
+###
+GET {{host}}/auth/users/test
+Content-Type: application/json

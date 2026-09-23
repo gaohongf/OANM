@@ -24,7 +24,6 @@ public class StpInterfaceImpl implements StpInterface {
             return List.of();
         }
         return permissionDao.selectPermissionKeysByUserId(Long.valueOf(loginId.toString()));
-       
     }
 
     @Override
