@@ -9,7 +9,7 @@
 |Spring Cloud Alibaba|2023.0.3.4|本项目基于Spring Cloud Alibaba|
 |Java|17|开发环境使用Java17满足Spring Boot 3.0+最低要求|
 |MySQL|8.x.x|数据库|
-|Redis|5.x.x.x|NoSQL，用作缓存|
+|Redis|6.x.x.x+|NoSQL，用作缓存， 版本必须6以上否则sa-token无法正常使用|
 |Nacos|v2.3.1|服务发现 服务治理|
 |Kafka|4.3.1+|MQ|
 ## 核心模块
