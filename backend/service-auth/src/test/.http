@@ -15,6 +15,7 @@ Content-Type: application/json
 ###
 POST {{host}}/auth/users
 Content-Type: application/json
+satoken: f39134f7-fc5e-490f-865b-35f411f33f75
 
 {
   "username": "2",
@@ -34,3 +35,4 @@ Content-Type: application/json
 ###
 GET {{host}}/auth/users/test
 Content-Type: application/json
+satoken: f7f83a68-fd11-45ad-94d2-822215c44ab7

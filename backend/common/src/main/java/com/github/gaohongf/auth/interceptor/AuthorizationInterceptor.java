@@ -1,14 +1,13 @@
 package com.github.gaohongf.auth.interceptor;
 
-import java.lang.invoke.MethodHandle;
-import java.lang.reflect.AnnotatedElement;
 
-import org.springframework.core.annotation.AnnotatedElementUtils;
 import org.springframework.lang.NonNull;
 import org.springframework.web.method.HandlerMethod;
 import org.springframework.web.servlet.HandlerInterceptor;
 
 import com.github.gaohongf.auth.annotation.IsOpen;
+import com.lingyun.base.rsm.HttpStatusRsm;
+import com.lingyun.base.rsm.R;
 
 import cn.dev33.satoken.stp.StpUtil;
 import jakarta.servlet.http.HttpServletRequest;
@@ -29,8 +28,9 @@ public class AuthorizationInterceptor implements HandlerInterceptor {
 
         String method = request.getMethod();
         String requestURI = request.getRequestURI();
-        System.out.println(StpUtil.hasPermission(method + ":" + requestURI));
-        System.out.println(StpUtil.getPermissionList());
-        return StpUtil.hasPermission(method + ":" + requestURI);
+        if (StpUtil.hasPermission(method + ":" + requestURI)) {
+            return true;
+        }
+        return R.error(HttpStatusRsm.FORBIDDEN);
     }
 }

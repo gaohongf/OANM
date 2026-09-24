@@ -1,1 +1,2 @@
 com.github.gaohongf.mybatis.MybatisPlusAutoConfiguration
+com.github.gaohongf.validation.ValidationConfig
