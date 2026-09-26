@@ -31,6 +31,16 @@
             <groupId>com.alibaba.cloud</groupId>
             <artifactId>spring-cloud-starter-alibaba-nacos-config</artifactId>
         </dependency>
+        <!--
+          @User 的远程解析走 Feign + lb://service-auth。
+          注意 spring-cloud-starter-openfeign 和 nacos-discovery 都把 loadbalancer
+          声明成 <optional>true</optional>, 不会传递过来 —— 少了它第一次解析就会
+          报 "No Feign Client for loadBalancing defined"。api-gateway 里也是显式加的。
+        -->
+        <dependency>
+            <groupId>org.springframework.cloud</groupId>
+            <artifactId>spring-cloud-starter-loadbalancer</artifactId>
+        </dependency>
         <dependency>
             <groupId>com.github.gaohongf</groupId>
             <artifactId>common</artifactId>

@@ -18,6 +18,29 @@
             <artifactId>rsm-mvc-spring-boot-starter</artifactId>
             <version>${lingyun.version}</version>
         </dependency>
+
+        <!--
+          说明: Jackson / Servlet 之前全靠 rsm-mvc-spring-boot-starter 传递进来, 这里显式声明。
+          序列化模块 (ResolveAutoConfiguration) 直接依赖 ObjectMapper 与
+          Jackson2ObjectMapperBuilderCustomizer, 不应该依赖"恰好有人传递了 jackson"。
+        -->
+        <dependency>
+            <groupId>org.springframework.boot</groupId>
+            <artifactId>spring-boot-starter-json</artifactId>
+        </dependency>
+
+        <!-- 服务间调用: @User 的解析需要回源到 service-auth -->
+        <dependency>
+            <groupId>org.springframework.cloud</groupId>
+            <artifactId>spring-cloud-starter-openfeign</artifactId>
+        </dependency>
+
+        <!-- 解析结果的进程内一级缓存 (L1), 版本由 spring-boot-dependencies BOM 管理 -->
+        <dependency>
+            <groupId>com.github.ben-manes.caffeine</groupId>
+            <artifactId>caffeine</artifactId>
+        </dependency>
+
         <dependency>
             <groupId>org.projectlombok</groupId>
             <artifactId>lombok</artifactId>
@@ -46,6 +69,16 @@
             <groupId>cn.dev33</groupId>
             <artifactId>sa-token-spring-boot3-starter</artifactId>
             <version>${sa-token.version}</version>
+        </dependency>
+        <dependency>
+            <groupId>org.mapstruct</groupId>
+            <artifactId>mapstruct</artifactId>
+            <version>${mapstruct.version}</version>
+        </dependency>
+        <dependency>
+            <groupId>org.mapstruct</groupId>
+            <artifactId>mapstruct-processor</artifactId>
+            <version>${mapstruct.version}</version>
         </dependency>
     </dependencies>
     <properties>

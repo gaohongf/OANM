@@ -5,6 +5,12 @@ spring:
   config:
     import:
       # 必须项：导入 Nacos 配置（optional: 前缀表示配置非必需，缺失时不报错）
+      # datasource-config / common-config 目前本服务还用不上, 但 common 把 mybatis-plus 和
+      # mysql 驱动带给了所有服务, DataSourceAutoConfiguration 因此会激活 ——
+      # 不导入这两份就会启动失败: "'url' attribute is not specified and no embedded datasource"。
+      # 等本服务有了自己的表, 这两份正好是要用的。
+      - optional:nacos:datasource-config-${spring.profiles.active}?group=DEFAULT_GROUP
+      - optional:nacos:common-config-${spring.profiles.active}?group=DEFAULT_GROUP
       - optional:nacos:${spring.application.name}.yaml?group=DEFAULT_GROUP
       - optional:nacos:${spring.application.name}-${spring.profiles.active}.yaml?group=DEFAULT_GROUP
 
@@ -20,3 +26,13 @@ spring:
         server-addr: 127.0.0.1:8848
         file-extension: yaml
         namespace: ${NACOS_NAMESPACE:}
+
+    # @User 的解析发生在 JSON 序列化过程中 —— 那时响应体已经开始写出, 没法再抛异常兜底。
+    # 所以回源调用必须快速失败, 不能让它把整个响应拖住。
+    # 默认的 60s readTimeout 会让 service-auth 抖一下就把所有响应卡死。
+    openfeign:
+      client:
+        config:
+          default:
+            connectTimeout: 500
+            readTimeout: 800

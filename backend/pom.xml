@@ -19,6 +19,14 @@
         <sa-token.version>1.46.0</sa-token.version>
         <mybatis-plus.version>3.5.7</mybatis-plus.version>
         <mysql-connector.version>8.4.0</mysql-connector.version>
+        <!-- MapStruct 1.6 起原生兼容 Lombok, 不再需要 lombok-mapstruct-binding -->
+        <mapstruct.version>1.6.3</mapstruct.version>
+        <!--
+          注解处理器路径必须带显式版本, 拿不到 spring-boot-dependencies 的版本管理。
+          这里要和 BOM 实际解析出来的 lombok 版本保持一致（当前 1.18.46）,
+          升级 Spring Boot 后如果出现 Lombok 相关诡异报错, 先来对一下这个值。
+        -->
+        <lombok.version>1.18.46</lombok.version>
     </properties>
     <packaging>pom</packaging>
     <modules>
@@ -32,6 +40,11 @@
             <groupId>org.springframework.boot</groupId>
             <artifactId>spring-boot-starter-data-redis</artifactId>
         </dependency>
+          <dependency>
+        <groupId>org.mapstruct</groupId>
+        <artifactId>mapstruct</artifactId>
+        <version>${mapstruct.version}</version>
+    </dependency>
     </dependencies>
     <dependencyManagement>
         <dependencies>
@@ -63,5 +76,55 @@
             </dependency>
         </dependencies>
     </dependencyManagement>
-
+    <build>
+        <plugins>
+            <plugin>
+                <groupId>org.apache.maven.plugins</groupId>
+                <artifactId>maven-compiler-plugin</artifactId>
+                <version>3.8.1</version>
+                <configuration>
+                    <source>${java.version}</source> <!-- 对应项目JDK版本 -->
+                    <target>${java.version}</target>
+                    <!--
+                      必须项: 把方法参数名写进 class 文件。
+                      Spring 的 @Cacheable(key = "#id") 这类 SpEL 是按参数名取值的, 没有它
+                      运行时直接抛 IllegalArgumentException: Null key returned for cache operation。
+                      平时这个是 spring-boot-starter-parent 默认打开的, 本项目没继承那个 parent
+                      (只 import 了它的 BOM), 所以得自己开。
+                    -->
+                    <parameters>true</parameters>
+                    <compilerArgs>
+                        <arg>-parameters</arg>
+                    </compilerArgs>
+                    <!--
+                      注意: 一旦显式声明了 annotationProcessorPaths, javac 就只在这个列表里找注解处理器,
+                      不再扫描编译 classpath。所以 lombok 必须显式列出来 ——
+                      少了它, @Data/@Slf4j 这些不会生成任何代码, 报错是"找不到符号 setXxx()",
+                      很容易误以为是代码写错了。
+                      lombok-mapstruct-binding 只是为了告诉 MapStruct "Lombok 会改 AST",
+                      它本身不提供 Lombok 处理器。
+                    -->
+                    <annotationProcessorPaths>
+                        <path>
+                            <groupId>org.springframework.boot</groupId>
+                            <artifactId>spring-boot-configuration-processor</artifactId>
+                            <version>${spring-boot.version}</version>
+                        </path>
+                        <path>
+                            <groupId>org.projectlombok</groupId>
+                            <artifactId>lombok</artifactId>
+                            <version>${lombok.version}</version>
+                        </path>
+                        <path>
+                            <groupId>org.mapstruct</groupId>
+                            <artifactId>mapstruct-processor</artifactId>
+                            <version>${mapstruct.version}</version>
+                        </path>
+              
+                    </annotationProcessorPaths>
+                    <encoding>${project.build.sourceEncoding}</encoding>
+                </configuration>
+            </plugin>
+        </plugins>
+    </build>
 </project>

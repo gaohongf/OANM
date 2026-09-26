@@ -37,4 +37,4 @@ replay_pid*
 *.sln
 *.sw?
 
-**/target/*
+target/

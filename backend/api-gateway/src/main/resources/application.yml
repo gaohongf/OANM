@@ -11,7 +11,12 @@ spring:
     gateway:
       discovery:
         locator:
-          enabled: true
+          # 关闭服务名自动路由。开着的话网关会为 Nacos 里每个服务额外生成一条
+          # /{serviceId}/** 路由, 它会绕过下面显式声明的 Path 规则 ——
+          # 也就是说 http://gateway/service-auth/auth/internal/users/1 能直接打到
+          # service-auth 那些不做鉴权的内部端点, 等于开放用户枚举。
+          # 显式路由已经覆盖了全部对外接口, 不需要它。
+          enabled: false
       routes:
         - id: service-auth
           uri: lb://service-auth
