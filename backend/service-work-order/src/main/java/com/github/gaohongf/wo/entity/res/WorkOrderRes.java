@@ -1,4 +1,4 @@
-package com.github.gaohongf.wo.res;
+package com.github.gaohongf.wo.entity.res;
 
 import com.fasterxml.jackson.annotation.JsonUnwrapped;
 import com.github.gaohongf.serializer.annotation.User;

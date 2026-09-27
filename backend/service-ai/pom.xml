@@ -10,9 +10,13 @@
     </parent>
 
     <groupId>com.github.gaohongf</groupId>
-    <artifactId>service-work-order</artifactId>
-    <version>${parent.version}</version>
+    <artifactId>service-ai</artifactId>
+    <version>1.0-SNAPSHOT</version>
     <dependencies>
+        <dependency>
+            <groupId>org.springframework.ai</groupId>
+            <artifactId>spring-ai-starter-model-openai</artifactId>
+         </dependency>
         <dependency>
             <groupId>org.springframework.boot</groupId>
             <artifactId>spring-boot-starter</artifactId>
@@ -41,15 +45,6 @@
             <groupId>org.springframework.cloud</groupId>
             <artifactId>spring-cloud-starter-loadbalancer</artifactId>
         </dependency>
-        <dependency>
-            <groupId>com.github.gaohongf</groupId>
-            <artifactId>common</artifactId>
-            <version>${parent.version}</version>
-        </dependency>
-        <dependency>
-            <groupId>org.springframework.ai</groupId>
-            <artifactId>spring-ai-starter-model-openai</artifactId>
-         </dependency>
     </dependencies>
     <properties>
         <maven.compiler.source>${java.version}</maven.compiler.source>

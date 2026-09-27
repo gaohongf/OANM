@@ -15,7 +15,7 @@ spring:
       - optional:nacos:${spring.application.name}-${spring.profiles.active}?group=DEFAULT_GROUP
 
   application:
-    name: service-work-order
+    name: service-ai
   profiles:
     active: dev
   cloud:
@@ -29,9 +29,10 @@ spring:
     # @User 的解析发生在 JSON 序列化过程中 —— 那时响应体已经开始写出, 没法再抛异常兜底。
     # 所以回源调用必须快速失败, 不能让它把整个响应拖住。
     # 默认的 60s readTimeout 会让 service-auth 抖一下就把所有响应卡死。
-    openfeign:
-      client:
-        config:
-          default:
-            connectTimeout: 500
-            readTimeout: 800
+    # openfeign:
+    #   client:
+    #     config:
+    #       default:
+    #         connectTimeout: 500
+    #         readTimeout: 800
+

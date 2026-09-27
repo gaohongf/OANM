@@ -27,6 +27,7 @@
           升级 Spring Boot 后如果出现 Lombok 相关诡异报错, 先来对一下这个值。
         -->
         <lombok.version>1.18.46</lombok.version>
+        <spring-ai.version>1.0.0</spring-ai.version>
     </properties>
     <packaging>pom</packaging>
     <modules>
@@ -34,6 +35,7 @@
         <module>api-gateway</module>
         <module>service-auth</module>
         <module>service-work-order</module>
+        <module>service-ai</module>
     </modules>
     <dependencies>
       <dependency>
@@ -48,6 +50,13 @@
     </dependencies>
     <dependencyManagement>
         <dependencies>
+            <dependency>
+                <groupId>org.springframework.ai</groupId>
+                <artifactId>spring-ai-bom</artifactId>
+                <version>${spring-ai.version}</version>
+                <type>pom</type>
+                <scope>import</scope>
+            </dependency>
             <!-- Spring Boot依赖管理 -->
             <dependency>
                 <groupId>org.springframework.boot</groupId>
