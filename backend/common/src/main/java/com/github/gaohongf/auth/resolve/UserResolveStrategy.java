@@ -40,7 +40,7 @@ import lombok.extern.slf4j.Slf4j;
  * 抛异常只会得到一截非法 JSON, 全局异常处理器兜不住。见 {@link ResolveStrategy#resolve}。
  */
 @Slf4j
-public class UserResolveStrategy implements ResolveStrategy<UserRes> {
+public class UserResolveStrategy implements ResolveStrategy<UserRes, Long> {
 
     /** 本地副本的存活时间。越短越不容易读到旧数据, 越长越省远程调用 */
     static final Duration LOCAL_TTL = Duration.ofSeconds(60);

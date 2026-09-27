@@ -23,37 +23,36 @@ import lombok.extern.slf4j.Slf4j;
  * 由 {@link ResolveAnnotationIntrospector} 按字段上的注解构造, 与具体业务无关。
  */
 @Slf4j
-public class ResolvingSerializer extends JsonSerializer<Object> {
+public class ResolvingSerializer<ID> extends JsonSerializer<ID> {
 
     /** 解析失败时只警告一次, 避免 auth 挂掉后日志被刷爆 */
     private static final AtomicBoolean DEGRADE_WARNED = new AtomicBoolean();
 
-    private final ResolveStrategy<Object> strategy;
+    private final ResolveStrategy<Object, ID> strategy;
     private final Set<String> fields;
 
     @SuppressWarnings("unchecked")
-    public ResolvingSerializer(ResolveStrategy<?> strategy, Annotation annotation) {
-        this.strategy = (ResolveStrategy<Object>) strategy;
+    public ResolvingSerializer(ResolveStrategy<?, ID> strategy, Annotation annotation) {
+        this.strategy = (ResolveStrategy<Object, ID>) strategy;
         this.fields = enabledFields(annotation);
     }
 
     @Override
-    public void serialize(Object value, JsonGenerator generator, SerializerProvider provider) throws IOException {
+    public void serialize(ID value, JsonGenerator generator, SerializerProvider provider) throws IOException {
         if (value == null) {
             provider.defaultSerializeNull(generator);
             return;
         }
 
-        Long id = toId(value);
-        if (id == null) {
-            // 注解标在了非数值字段上, 不做解析, 保持默认行为
-            provider.defaultSerializeValue(value, generator);
-            return;
-        }
+        // if (value == null) {
+        // // 注解标在了非数值字段上, 不做解析, 保持默认行为
+        // provider.defaultSerializeValue(value, generator);
+        // return;
+        // }
 
         Object rendered;
         try {
-            Object resolved = strategy.resolve(id);
+            Object resolved = strategy.resolve(value);
             // 投影和解析一起兜住: FieldProjector 走反射, 同样可能失败,
             // 放在 try 外面等于白兜异常。
             rendered = resolved == null ? null : strategy.project(resolved, fields);
@@ -67,9 +66,10 @@ public class ResolvingSerializer extends JsonSerializer<Object> {
 
         if (rendered == null) {
             // 降级形态: 至少把 id 还给客户端, 让它知道这个字段指向谁
-            Map<String, Object> fallback = new LinkedHashMap<>();
-            fallback.put("id", id);
-            provider.defaultSerializeValue(fallback, generator);
+            // Map<String, Object> fallback = new LinkedHashMap<>();
+            // fallback.put("id", value);
+            // provider.defaultSerializeValue(fallback, generator);
+            generator.writeObject(value);
             return;
         }
 
@@ -112,10 +112,10 @@ public class ResolvingSerializer extends JsonSerializer<Object> {
     /**
      * 目前只认数值类型的 id。注解标在别的类型上时返回 null, 交由调用方按默认行为序列化。
      */
-    private static Long toId(Object value) {
-        if (value instanceof Number number) {
-            return number.longValue();
-        }
-        return null;
-    }
+    // private static Long toId(Object value) {
+    // if (value instanceof Number number) {
+    // return number.longValue();
+    // }
+    // return null;
+    // }
 }

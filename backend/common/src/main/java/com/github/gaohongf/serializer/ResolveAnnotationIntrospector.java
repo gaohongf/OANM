@@ -27,7 +27,7 @@ public class ResolveAnnotationIntrospector extends NopAnnotationIntrospector {
 
     @Override
     public Object findSerializer(Annotated annotated) {
-        for (ResolveStrategy<?> strategy : registry.all()) {
+        for (ResolveStrategy<?,?> strategy : registry.all()) {
             Annotation annotation = annotated.getAnnotation(strategy.annotation());
             if (annotation != null) {
                 return new ResolvingSerializer(strategy, annotation);

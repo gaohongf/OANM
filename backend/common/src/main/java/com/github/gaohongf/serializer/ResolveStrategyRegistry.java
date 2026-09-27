@@ -18,14 +18,14 @@ import java.util.Map;
  */
 public class ResolveStrategyRegistry {
 
-    private final Map<Class<? extends Annotation>, ResolveStrategy<?>> byAnnotation;
+    private final Map<Class<? extends Annotation>, ResolveStrategy<?,?>> byAnnotation;
     /** 与 byAnnotation 同序, 但省掉每次查表时的视图分配 —— 它在每个字段的序列化里都会被遍历 */
-    private final List<ResolveStrategy<?>> ordered;
+    private final List<ResolveStrategy<?,?>> ordered;
 
-    public ResolveStrategyRegistry(List<ResolveStrategy<?>> strategies) {
-        Map<Class<? extends Annotation>, ResolveStrategy<?>> map = new LinkedHashMap<>();
-        for (ResolveStrategy<?> strategy : strategies) {
-            ResolveStrategy<?> previous = map.putIfAbsent(strategy.annotation(), strategy);
+    public ResolveStrategyRegistry(List<ResolveStrategy<?,?>> strategies) {
+        Map<Class<? extends Annotation>, ResolveStrategy<?,?>> map = new LinkedHashMap<>();
+        for (ResolveStrategy<?,?> strategy : strategies) {
+           ResolveStrategy<?,?> previous = map.putIfAbsent(strategy.annotation(), strategy);
             if (previous != null) {
                 throw new IllegalStateException("注解 " + strategy.annotation().getName()
                         + " 被多个 ResolveStrategy 声明: "
@@ -36,11 +36,11 @@ public class ResolveStrategyRegistry {
         this.ordered = List.copyOf(map.values());
     }
 
-    public List<ResolveStrategy<?>> all() {
+    public List<ResolveStrategy<?,?>> all() {
         return ordered;
     }
 
-    public ResolveStrategy<?> findByAnnotation(Class<? extends Annotation> annotationType) {
+    public ResolveStrategy<?,?> findByAnnotation(Class<? extends Annotation> annotationType) {
         return byAnnotation.get(annotationType);
     }
 }

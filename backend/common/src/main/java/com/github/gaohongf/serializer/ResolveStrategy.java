@@ -15,7 +15,7 @@ import java.util.Set;
  *
  * @param <T> 解析出来的对象类型
  */
-public interface ResolveStrategy<T> {
+public interface ResolveStrategy<T, ID> {
 
     /**
      * 本策略负责哪个注解。注册表按注解类型建索引, 一个注解只能对应一个策略。
@@ -38,7 +38,7 @@ public interface ResolveStrategy<T> {
      *       {@code UserResolveStrategy} 的"每进程只 WARN 一次"写法。</li>
      * </ul>
      */
-    Map<Long, T> resolveBatch(Collection<Long> ids);
+    Map<ID, T> resolveBatch(Collection<ID> ids);
 
     /**
      * 单条解析。
@@ -47,7 +47,7 @@ public interface ResolveStrategy<T> {
      * 任何异常都会导致吐出一截非法 JSON 且无法被全局异常处理器兜住。所以实现必须
      * 自己吞掉远程调用异常并返回 null, 由调用方降级渲染。
      */
-    default T resolve(Long id) {
+    default T resolve(ID id) {
         if (id == null) {
             return null;
         }

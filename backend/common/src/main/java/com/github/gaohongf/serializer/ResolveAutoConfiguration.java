@@ -24,7 +24,7 @@ public class ResolveAutoConfiguration {
 
     @Bean
     @ConditionalOnMissingBean
-    public ResolveStrategyRegistry resolveStrategyRegistry(ObjectProvider<ResolveStrategy<?>> strategies) {
+    public ResolveStrategyRegistry resolveStrategyRegistry(ObjectProvider<ResolveStrategy<?,?>> strategies) {
         return new ResolveStrategyRegistry(strategies.orderedStream().toList());
     }
 
