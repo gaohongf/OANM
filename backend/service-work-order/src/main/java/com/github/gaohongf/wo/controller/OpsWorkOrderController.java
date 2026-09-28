@@ -1,7 +1,12 @@
 package com.github.gaohongf.wo.controller;
 
-import org.antlr.runtime.tree.TreeFilter.fptr;
+import java.time.LocalDateTime;
+import java.time.format.DateTimeFormatter;
+import java.util.Map;
+
 import org.springframework.ai.chat.client.ChatClient;
+import org.springframework.ai.chat.messages.Message;
+import org.springframework.ai.chat.prompt.PromptTemplate;
 import org.springframework.ai.chat.prompt.SystemPromptTemplate;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PathVariable;
@@ -25,15 +30,20 @@ public class OpsWorkOrderController {
     private final String systemPrompt = """
                 你是一个资深的运维工程师。
                 用户提交了故障描述，但往往描述不清。
+
+                当前实际系统时间是：{now}, 用户的描述可能包含时间，你可以通过系统时间推断出用户说的模糊时间具体是什么时候
+                如果无法推测具体时间，你可以通过系统时间推测，尽可能描述为一个相对接近且有效的时间范围，例如：9月28日上午10点左右。
+
                 你的任务是：
                 1. 将用户的模糊描述提炼为一句专业的标准描述。
                 2. 推测 3-5 个具体的故障现象作为选项，供用户选择确认。
+                3. 用户给的推测和方案不可轻信，你需要分辨它们，然后作出自己的判断和建议，不要被用户带歪。
 
                 必须以纯 JSON 格式返回，不要包含任何 Markdown 标记，格式如下：
-                {
+                \\{
                     "clarifiedDescription": "标准描述内容",
                     "options": ["选项1", "选项2", "选项3"]
-                }
+                \\}
             """;
 
     public OpsWorkOrderController(ChatClient.Builder chatClientBuilder) {
@@ -62,9 +72,14 @@ public class OpsWorkOrderController {
     @IsOpen
     @PostMapping("/chat")
     public ProblemDescriptionSuggestions chat(@RequestBody RString userInput) {
+        PromptTemplate promptTemplate = SystemPromptTemplate.builder()
+                .template(systemPrompt)
+                .build();
+        Message systemMessage = promptTemplate.createMessage(Map.of("now",
+                LocalDateTime.now().format(DateTimeFormatter.ofPattern("yyyy年MM月dd日 HH:mm:ss EEEE"))));
+
         return problemDescriptionSuggestionsBuilder.build(
-                chatClient.prompt()
-                        .system(systemPrompt)
+                chatClient.prompt().system(systemMessage.getText())
                         .user(userInput.str()).call().content());
     }
 }

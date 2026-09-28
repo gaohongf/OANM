@@ -4,5 +4,5 @@ POST {{host}}/api/ops/work_order/chat
 Content-Type: application/json
 
 {
-  "str": "办公室的打印机坏了"
+  "str": ""
 }
