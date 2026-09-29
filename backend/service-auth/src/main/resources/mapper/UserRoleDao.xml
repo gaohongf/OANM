@@ -4,9 +4,16 @@
 <mapper namespace="com.github.gaohongf.auth.dao.UserRoleDao">
 
     <!--
-      说明: 该表无独立主键, BaseMapper 的单条 CRUD 可用 (按条件), 批量新增 BaseMapper 不提供, 故自定义。
+      说明: 该表无独立主键, BaseMapper 的单条 CRUD 可用 (按条件), 批量新增与按条件删除
+      BaseMapper 不提供, 故自定义。
+
       deleted / version 直接写死 0: 这两列在库中是 NOT NULL, 批量插入时不期望调用方逐个赋值。
-      审计字段沿用实体上的值, 若后续补了 MetaObjectHandler, 调用前记得先把字段填充好。
+      审计字段沿用实体上的值 —— 本语句是裸 SQL, 不经过 MyBatis-Plus 的插入路径,
+      AuditMetaObjectHandler 的自动填充对它无效, 调用方必须自己填好。
+
+      删除一律是物理 DELETE, 不是逻辑删除。原因见 RolePermissionDao 的类注释:
+      主键是 (user_id, role_name) 这对物理组合, 逻辑删除后重新插入同一对会撞主键,
+      表现为"角色收回之后就再也授不回来了"。
     -->
     <insert id="insertBatch">
         INSERT INTO user_roles (user_id, role_name, create_by, create_time, update_by, update_time, deleted, version)
@@ -16,5 +23,9 @@
              #{item.updateBy}, #{item.updateTime}, 0, 0)
         </foreach>
     </insert>
+
+    <delete id="deleteByUserId">
+        DELETE FROM user_roles WHERE user_id = #{userId}
+    </delete>
 
 </mapper>

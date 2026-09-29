@@ -38,3 +38,10 @@ replay_pid*
 *.sw?
 
 target/
+
+# 网关的动态路由缓存（last-known-good）。
+# 路径由 oanm.gateway.routes.cache-file 配置, 默认是相对工作目录的 ./gateway-routes.json,
+# 所以从 IDE 启动网关时会生成在 api-gateway/ 下。它是运行时状态而不是源码 ——
+# 提交过去的话, 别人拉到的一份可能过期的路由会在 service-auth 不可用时被当成兜底启用。
+gateway-routes.json
+gateway-routes.json.tmp

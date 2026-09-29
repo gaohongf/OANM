@@ -125,3 +125,87 @@ CREATE TABLE `role_permissions`
     CONSTRAINT `fk_role_permissions_permission` FOREIGN KEY (`permission_id`) REFERENCES `permissions` (`id`)
 ) ENGINE = InnoDB
   DEFAULT CHARSET = utf8mb4 COMMENT ='角色-权限关联表';
+
+-- ------------------------------------------------------------
+-- 前端菜单树
+--
+-- 职责: 一份定义同时喂前端菜单渲染与前端路由注册。
+--   有 component = 一个可打开的页面; 没有 component = 一个只用来分组的目录。
+--   刻意没有 type 列: 这个区分能从 component 推导出来, 存一份就多一处可能不一致的状态。
+--   按钮级权限也不需要菜单行 —— 前端拿到的是 /api/auth/me 返回的权限键列表, 按钮直接用键判断。
+--
+-- component 的取值约定(跨阶段契约, 阶段四的前端按这个查组件):
+--   相对 src/pages/ 的路径, 如 ops/work-order/index。
+--   前端用 import.meta.glob('../pages/**/*.tsx') 建一张白名单按路径索引, 因此
+--   后端只能"选一个已存在的页面", 不能加载任意模块; 查不到就渲染 404 并 WARN。
+-- ------------------------------------------------------------
+DROP TABLE IF EXISTS `menus`;
+CREATE TABLE `menus`
+(
+    `id`            BIGINT       NOT NULL COMMENT '主键, 雪花ID',
+    `parent_id`     BIGINT       NULL COMMENT '父节点ID; NULL 表示顶级',
+    `name`          VARCHAR(64)  NOT NULL COMMENT '显示标题',
+    `path`          VARCHAR(255) NULL COMMENT '前端路由, 如 /ops/work-order',
+    `component`     VARCHAR(128) NULL COMMENT '前端页面标识(相对 src/pages/ 的路径); 为空即目录',
+    `icon`          VARCHAR(64)  NULL COMMENT '图标名',
+    `sort`          INT          NOT NULL DEFAULT 0 COMMENT '同级排序, 升序',
+    `hidden`        TINYINT(1)   NOT NULL DEFAULT 0 COMMENT '在侧边栏隐藏(但仍可路由, 用于详情页)',
+    `keep_alive`    TINYINT(1)   NOT NULL DEFAULT 0 COMMENT '前端是否缓存该页面',
+    -- 用外键而不是权限键字符串: 字符串的失效模式是"权限改名后菜单关联静默断开 →
+    -- 菜单失去门禁 → 对所有人可见", 是 fail-open 的安全退化。外键则改名天然安全。
+    `permission_id` BIGINT       NULL COMMENT '所需权限, 关联 permissions.id; NULL 表示登录即可见',
+    `enabled`       TINYINT(1)   NOT NULL DEFAULT 1 COMMENT '是否启用',
+    `locked`        TINYINT(1)   NOT NULL DEFAULT 0 COMMENT '人工锁定: 1-自注册不得覆盖',
+    `source`        VARCHAR(16)  NOT NULL DEFAULT 'MANUAL' COMMENT '来源: MANUAL-人工 REGISTERED-自注册',
+
+    `create_by`     BIGINT       NULL COMMENT '创建人ID',
+    `create_time`   DATETIME     NULL COMMENT '创建时间',
+    `update_by`     BIGINT       NULL COMMENT '更新人ID',
+    `update_time`   DATETIME     NULL COMMENT '更新时间',
+    `deleted`       INT          NOT NULL DEFAULT 0 COMMENT '逻辑删除: 0-未删除 1-已删除',
+    `version`       INT          NOT NULL DEFAULT 0 COMMENT '乐观锁版本号',
+
+    PRIMARY KEY (`id`),
+    KEY `idx_menus_parent_id` (`parent_id`),
+    KEY `idx_menus_permission_id` (`permission_id`),
+    CONSTRAINT `fk_menus_permission` FOREIGN KEY (`permission_id`) REFERENCES `permissions` (`id`)
+) ENGINE = InnoDB
+  DEFAULT CHARSET = utf8mb4 COMMENT ='前端菜单树';
+
+-- ------------------------------------------------------------
+-- 网关路由(只负责转发, 不负责鉴权)
+--
+-- 粒度是"服务前缀": 一行一个 path_pattern → uri。端点级的权限信息不在这里,
+-- 而在 permissions 表里(键形如 GET:/api/ops/work_order/{id})。
+--
+-- 为什么刻意不把两者合到一张表: 少一行路由的表现是"网关 404", 少一条权限的表现是
+-- "服务 403"。分开之后, 路由永远不会因为权限数据缺失而中断, 故障现象指向正确的方向。
+--
+-- 没有 method 列: 前缀与方法无关。
+-- 没有 permission_id 列: 一个前缀不对应单一权限。
+-- 没有 filters 列: 按路径约定(服务内路径 == 外部路径)不需要 StripPrefix,
+--   现在加一个没人用的过滤器列只会逼着现在就发明一种序列化格式。
+-- ------------------------------------------------------------
+DROP TABLE IF EXISTS `api_routes`;
+CREATE TABLE `api_routes`
+(
+    `id`           BIGINT       NOT NULL COMMENT '主键, 雪花ID',
+    `name`         VARCHAR(64)  NOT NULL COMMENT '备注名, 如 工单服务',
+    `path_pattern` VARCHAR(255) NOT NULL COMMENT '路径前缀, 如 /api/ops/**',
+    `uri`          VARCHAR(255) NOT NULL COMMENT '目标服务, 如 lb://service-work-order',
+    `route_order`  INT          NOT NULL DEFAULT 0 COMMENT '网关路由优先级, 越小越优先',
+    `enabled`      TINYINT(1)   NOT NULL DEFAULT 1 COMMENT '是否启用',
+    `locked`       TINYINT(1)   NOT NULL DEFAULT 0 COMMENT '人工锁定: 1-自注册不得覆盖',
+    `source`       VARCHAR(16)  NOT NULL DEFAULT 'MANUAL' COMMENT '来源: MANUAL-人工 REGISTERED-自注册',
+
+    `create_by`    BIGINT       NULL COMMENT '创建人ID',
+    `create_time`  DATETIME     NULL COMMENT '创建时间',
+    `update_by`    BIGINT       NULL COMMENT '更新人ID',
+    `update_time`  DATETIME     NULL COMMENT '更新时间',
+    `deleted`      INT          NOT NULL DEFAULT 0 COMMENT '逻辑删除: 0-未删除 1-已删除',
+    `version`      INT          NOT NULL DEFAULT 0 COMMENT '乐观锁版本号',
+
+    PRIMARY KEY (`id`),
+    UNIQUE KEY `uk_api_routes_path_pattern` (`path_pattern`)
+) ENGINE = InnoDB
+  DEFAULT CHARSET = utf8mb4 COMMENT ='网关路由(只负责转发)';

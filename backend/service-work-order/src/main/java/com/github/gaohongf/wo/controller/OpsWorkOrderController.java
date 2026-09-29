@@ -77,7 +77,6 @@ public class OpsWorkOrderController {
                 .build();
         Message systemMessage = promptTemplate.createMessage(Map.of("now",
                 LocalDateTime.now().format(DateTimeFormatter.ofPattern("yyyy年MM月dd日 HH:mm:ss EEEE"))));
-
         return problemDescriptionSuggestionsBuilder.build(
                 chatClient.prompt().system(systemMessage.getText())
                         .user(userInput.str()).call().content());

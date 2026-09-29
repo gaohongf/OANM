@@ -4,5 +4,5 @@ POST {{host}}/api/ops/work_order/chat
 Content-Type: application/json
 
 {
-  "str": ""
+  "str": "我要请假，但一致提示提交失败"
 }

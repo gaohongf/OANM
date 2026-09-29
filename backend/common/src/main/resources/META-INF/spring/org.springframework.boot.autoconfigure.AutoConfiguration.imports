@@ -4,3 +4,7 @@ com.github.gaohongf.redis.CacheConfiguration
 com.github.gaohongf.serializer.ResolveAutoConfiguration
 com.github.gaohongf.auth.resolve.FeignUserLookupAutoConfiguration
 com.github.gaohongf.auth.resolve.UserResolveAutoConfiguration
+com.github.gaohongf.auth.satoken.RemoteStpInterfaceAutoConfiguration
+com.github.gaohongf.auth.satoken.AuthorityBroadcastAutoConfiguration
+com.github.gaohongf.auth.config.AuthorizationAutoConfiguration
+com.github.gaohongf.auth.register.ServiceRegistrationAutoConfiguration

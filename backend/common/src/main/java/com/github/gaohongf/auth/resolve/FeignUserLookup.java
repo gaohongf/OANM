@@ -25,6 +25,13 @@ public class FeignUserLookup implements UserLookup {
     @Override
     public UserRes findById(Long id) {
         ApiResponse<UserRes> response = userClient.findById(id);
-        return response == null ? null : response.data();
+        if (response == null) {
+            throw new IllegalStateException("查询用户 " + id + " 失败: 响应为空");
+        }
+        // 必须检查信封: 后端的业务失败是 "HTTP 200 + type=ERROR"，只看状态码看不出来。
+        // 不检查的话，"内部错误"会被当成"查无此人"，还会被负缓存住 —— 与 UserLookup
+        // 契约里"null 表示确实不存在、失败必须抛"的分工正好相反。
+        response.requireSuccess("查询用户 " + id);
+        return response.data();
     }
 }

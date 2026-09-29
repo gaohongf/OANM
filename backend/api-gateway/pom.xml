@@ -33,6 +33,18 @@
             <groupId>com.alibaba.csp</groupId>
             <artifactId>sentinel-spring-cloud-gateway-adapter</artifactId>
         </dependency>
+
+        <!--
+          网关是唯一不依赖 common 的模块（common 是 Servlet 技术栈, 与本模块的 WebFlux 冲突）,
+          所以也就没有从 common 继承到 lombok, 需要自己声明。
+          scope=provided: 它只在编译期生成 getter/日志字段, 运行期不需要它出现在 classpath 上。
+          注解处理器本身由父 pom 的 annotationProcessorPaths 统一配置, 这里不需要再写。
+        -->
+        <dependency>
+            <groupId>org.projectlombok</groupId>
+            <artifactId>lombok</artifactId>
+            <scope>provided</scope>
+        </dependency>
     </dependencies>
     <properties>
         <maven.compiler.source>${java.version}</maven.compiler.source>

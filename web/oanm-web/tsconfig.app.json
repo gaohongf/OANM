@@ -16,6 +16,13 @@
     "noEmit": true,
     "jsx": "react-jsx",
 
+    /*
+      脚手架默认没开严格模式。开了才真正满足 standard.md 里"使用TS, 尽可能少使用 any" ——
+      没有 strictNullChecks 时 TS 几乎不拦任何空值问题, 类型标注接近于注释。
+    */
+    "strict": true,
+    "noImplicitOverride": true,
+
     /* Linting */
     "noUnusedLocals": true,
     "noUnusedParameters": true,

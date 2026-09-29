@@ -15,7 +15,7 @@ import lombok.AllArgsConstructor;
 
 @AllArgsConstructor
 @RestController
-@RequestMapping("/auth/acc")
+@RequestMapping("/api/auth/acc")
 public class AccessController {
 
     private final AccessService accessService;

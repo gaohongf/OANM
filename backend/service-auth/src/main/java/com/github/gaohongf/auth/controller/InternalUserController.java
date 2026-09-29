@@ -7,6 +7,7 @@ import org.springframework.web.bind.annotation.RestController;
 
 import com.github.gaohongf.auth.annotation.IsOpen;
 import com.github.gaohongf.auth.client.AuthInternalApi;
+import com.github.gaohongf.auth.res.UserAuthorities;
 import com.github.gaohongf.auth.res.UserRes;
 import com.github.gaohongf.auth.service.UserService;
 
@@ -40,5 +41,18 @@ public class InternalUserController {
     @GetMapping("/{id}")
     public UserRes findUser(@PathVariable("id") Long id) {
         return userService.findUser(id);
+    }
+
+    /**
+     * 按 id 查用户的角色与权限, 供各服务的 {@code StpInterface} 使用。
+     * <p>
+     * 与 {@link #findUser} 不同, 用户不存在时这里返回<b>空授权</b>而不是 null ——
+     * 调用方拿到空集合的语义就是"此人无任何权限", 正好是鉴权想要的默认值,
+     * 不必区分"用户不存在"和"没有任何授权"（这两种情况下都应该拒绝）。
+     */
+    @IsOpen
+    @GetMapping("/{id}/authorities")
+    public UserAuthorities findAuthorities(@PathVariable("id") Long id) {
+        return userService.findAuthorities(id);
     }
 }

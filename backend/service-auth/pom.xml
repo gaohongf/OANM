@@ -37,17 +37,10 @@
             <artifactId>common</artifactId>
             <version>${parent.version}</version>
         </dependency>
-        <dependency>
-            <groupId>cn.dev33</groupId>
-            <artifactId>sa-token-redis-template</artifactId>
-            <version>${sa-token.version}</version>
-        </dependency>
-
-        <!-- 提供 Redis 连接池 -->
-        <dependency>
-            <groupId>org.apache.commons</groupId>
-            <artifactId>commons-pool2</artifactId>
-        </dependency>
+        <!--
+          sa-token 的 Redis 会话存储 (sa-token-redis-template) 与 commons-pool2 已移到 common:
+          所有服务必须共享同一份会话存储, 否则 token 跨服务认不出来。见 common/pom.xml 的说明。
+        -->
 
         <dependency>
             <groupId>org.springframework.boot</groupId>

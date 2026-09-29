@@ -9,21 +9,43 @@ spring:
       discovery:
         server-addr: 127.0.0.1:8848
     gateway:
-      discovery:
-        locator:
-          # 关闭服务名自动路由。开着的话网关会为 Nacos 里每个服务额外生成一条
-          # /{serviceId}/** 路由, 它会绕过下面显式声明的 Path 规则 ——
-          # 也就是说 http://gateway/service-auth/auth/internal/users/1 能直接打到
-          # service-auth 那些不做鉴权的内部端点, 等于开放用户枚举。
-          # 显式路由已经覆盖了全部对外接口, 不需要它。
-          enabled: false
-      routes:
-        - id: service-auth
-          uri: lb://service-auth
-          predicates:
-            - Path=/api/auth/**
-        - id: service-work-order
-          uri: lb://service-work-order
-          predicates:
-            - Path=/api/ops/**
-            
+      # 注意属性前缀: 网关自己的配置在 2025.x 里搬到了 server.webflux 之下。
+      # 旧的 spring.cloud.gateway.discovery.locator 仍然能用, 但会触发一个迁移警告
+      # （PropertiesMigrationListener）, 且以后会被移除, 所以这里直接用新前缀。
+      server:
+        webflux:
+          discovery:
+            locator:
+              # 关闭服务名自动路由。开着的话网关会为 Nacos 里每个服务额外生成一条
+              # /{serviceId}/** 路由, 它会绕过 /api/** 的规则 ——
+              # 也就是说 http://gateway/service-auth/auth/internal/users/1 能直接打到
+              # service-auth 那些不做鉴权的内部端点, 等于开放用户枚举。
+              enabled: false
+
+      # 这里刻意没有 `routes:`。
+      #
+      # 路由完全由 service-auth 的 api_routes 表驱动: 网关启动时拉一次, 之后靠 Redis 广播
+      # 热更新（见 DynamicRouteRefresher）。
+      #
+      # 为什么不能留一份静态路由当兜底: 静态路由和动态路由会被
+      # CompositeRouteDefinitionLocator 按 id 合并成<b>两份独立的定义</b>, 而
+      # RoutePredicateHandlerMapping 按 order 取第一个匹配。静态路由的 order 默认是 0,
+      # 动态路由的来自 route_order（示例里是 10/20）, 于是静态的那条永远先命中 ——
+      # 表现是"在管理界面改了路由, 网关转发目标纹丝不动", 且没有任何报错。
+      #
+      # 兜底改由本地缓存文件承担: 每次拉取成功都会落盘一份, service-auth 不可用时用这一份起来。
+
+# 动态路由相关配置
+oanm:
+  gateway:
+    routes:
+      # service-auth 的服务名, 通过 Nacos 解析, 不需要写死 IP。
+      service-name: service-auth
+      # 兜底轮询间隔。
+      #
+      # 必须带单位后缀: Spring 把<b>裸数字</b>绑定到 Duration 时默认单位是毫秒,
+      # 写 `60` 会变成 60 毫秒（这里踩过: 网关每 78ms 打一次 service-auth）。
+      # 代码侧还加了 @DurationUnit(SECONDS) 兜一道, 两处都写清楚。
+      version-poll-interval: 60s
+      # last-known-good 缓存文件。相对路径基于进程的工作目录。
+      cache-file: ./gateway-routes.json

@@ -57,9 +57,14 @@ public class AuditMetaObjectHandler implements MetaObjectHandler {
      * sa-token 抛的是 SaTokenContextException, 登录 ID 非数字时抛的是 NumberFormatException,
      * 这几种情况的对策一致 —— 视为取不到操作人。
      *
+     * <p><b>为什么是 public static</b>: 批量插入用的自定义 XML（{@code RolePermissionDao.insertBatch}、
+     * {@code UserRoleDao.insertBatch}）是裸 SQL, 不经过 MyBatis-Plus 的插入路径, 本处理器的
+     * 自动填充对它们<b>不生效</b>。那些地方必须自己填审计字段, 所以需要复用这段
+     * "当前操作人怎么取"的逻辑, 而不是各写一份（否则 sa-token 的取值方式一改就会漏改）。
+     *
      * @return 当前登录用户 ID, 取不到时返回 null
      */
-    private Long currentOperatorId() {
+    public static Long currentOperatorId() {
         try {
             return StpUtil.getLoginIdAsLong();
         } catch (RuntimeException e) {

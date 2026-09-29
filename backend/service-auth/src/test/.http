@@ -1,38 +1,185 @@
 @host = http://localhost:8084
-# 创建用户
-POST {{host}}/auth/users
+@token = 请替换为登录返回的 tokenValue
+# 注意: 对外接口路径统一为 /api/<域>/..., 且服务内部路径与外部路径一致。
+# 这里的路径同时是网关谓词和权限键, 改名时三处要一起改。见 standard.md。
+
+### 登录（@IsOpen）
+POST {{host}}/api/auth/acc/login
 Content-Type: application/json
 
 {
-  "username": "admin",
-  "password": "admin123"
+  "username": "tester",
+  "password": "secret123"
 }
 
+### 当前用户上下文: 用户 + 角色 + 权限键 + 可见菜单树（@LoginOnly: 只要登录）
+GET {{host}}/api/auth/me
+satoken: {{token}}
 
+### 登出（@LoginOnly）
+POST {{host}}/api/auth/logout
+satoken: {{token}}
 
+# ---------------------------------------------------------------- 角色
 
+### 角色列表
+GET {{host}}/api/auth/roles
+satoken: {{token}}
 
-###
-POST {{host}}/auth/users
+### 新建角色
+POST {{host}}/api/auth/roles
 Content-Type: application/json
-satoken: f39134f7-fc5e-490f-865b-35f411f33f75
+satoken: {{token}}
 
 {
-  "username": "2",
-  "password": "a"
+  "roleName": "viewer",
+  "label": "只读用户"
 }
 
-
-###
-POST {{host}}/auth/acc/login
+### 修改角色（只能改 label; roleName 是主键, 不支持改名）
+PUT {{host}}/api/auth/roles/viewer
 Content-Type: application/json
+satoken: {{token}}
 
 {
-  "username": "admin",
-  "password": "admin123"
+  "roleName": "viewer",
+  "label": "只读用户（改过）"
 }
 
-###
-GET {{host}}/auth/users/test
+### 删除角色（被用户持有时会拒绝）
+DELETE {{host}}/api/auth/roles/viewer
+satoken: {{token}}
+
+# ---------------------------------------------------------------- 权限
+
+### 权限分页（permissions 会随自注册涨到几百上千行, 所以分页 + 支持搜索）
+GET {{host}}/api/auth/permissions?current=1&size=10&keyword=ops
+satoken: {{token}}
+
+### 新建权限
+POST {{host}}/api/auth/permissions
 Content-Type: application/json
-satoken: f7f83a68-fd11-45ad-94d2-822215c44ab7
+satoken: {{token}}
+
+{
+  "permissionKey": "GET:/api/ops/work_order/{id}",
+  "label": "查看工单"
+}
+
+### 删除权限（内置的 * 与正被菜单引用的会被拒绝）
+DELETE {{host}}/api/auth/permissions/7001
+satoken: {{token}}
+
+# ---------------------------------------------------------------- 授权
+
+### 给角色授权（整体替换: 这里传的是该角色最终应拥有的权限全集, 空数组 = 清空）
+PUT {{host}}/api/auth/roles/viewer/permissions
+Content-Type: application/json
+satoken: {{token}}
+
+{
+  "permissionIds": [7001]
+}
+
+### 给用户授角色（整体替换）
+PUT {{host}}/api/auth/users/9001/roles
+Content-Type: application/json
+satoken: {{token}}
+
+{
+  "roleNames": ["viewer"]
+}
+
+# ---------------------------------------------------------------- 菜单
+
+### 全量菜单树（管理端: 含隐藏与已停用节点, 不过滤权限）
+GET {{host}}/api/auth/menus
+satoken: {{token}}
+
+### 新建目录（没有 component 就是目录）
+POST {{host}}/api/auth/menus
+Content-Type: application/json
+satoken: {{token}}
+
+{
+  "name": "运维管理",
+  "icon": "setting",
+  "sort": 10
+}
+
+### 新建页面（component 是相对前端 src/pages/ 的路径; 有 component 就必须有 path）
+POST {{host}}/api/auth/menus
+Content-Type: application/json
+satoken: {{token}}
+
+{
+  "name": "工单管理",
+  "path": "/ops/work-order",
+  "component": "ops/work-order/index",
+  "sort": 1
+}
+
+### 移动节点（把页面挂到目录下; 挂到自己或自己的子节点下会被拒绝）
+PUT {{host}}/api/auth/menus/请替换为页面ID
+Content-Type: application/json
+satoken: {{token}}
+
+{
+  "parentId": 请替换为目录ID,
+  "name": "工单管理",
+  "path": "/ops/work-order",
+  "component": "ops/work-order/index",
+  "sort": 1
+}
+
+### 删除菜单（有子节点时会拒绝, 不会静默级联）
+DELETE {{host}}/api/auth/menus/请替换为ID
+satoken: {{token}}
+
+# ---------------------------------------------------------------- 网关路由
+
+### 路由列表
+GET {{host}}/api/auth/api-routes
+satoken: {{token}}
+
+### 新建路由（粒度是服务前缀, 不是单个接口; pathPattern 必须以 / 开头）
+POST {{host}}/api/auth/api-routes
+Content-Type: application/json
+satoken: {{token}}
+
+{
+  "name": "工单服务",
+  "pathPattern": "/api/ops/**",
+  "uri": "lb://service-work-order",
+  "routeOrder": 10
+}
+
+### 改路由的 uri / 优先级 —— 改完网关立刻热更新, 不用重启
+PUT {{host}}/api/auth/api-routes/请替换为ID
+Content-Type: application/json
+satoken: {{token}}
+
+{
+  "name": "工单服务",
+  "pathPattern": "/api/ops/**",
+  "uri": "lb://service-work-order",
+  "routeOrder": 5
+}
+
+# ---------------------------------------------------------------- 内部端点（不经网关, @IsOpen）
+
+### 带 token 调需要权限的接口
+GET {{host}}/api/auth/users/test
+satoken: {{token}}
+
+### 按 id 查用户
+GET {{host}}/auth/internal/users/1
+
+### 用户的角色与权限（各服务的 StpInterface 用）
+GET {{host}}/auth/internal/users/1/authorities
+
+### 网关用的全量路由（形状对齐 RouteDefinition）
+GET {{host}}/auth/internal/routes
+
+### 路由版本号（网关轮询兜底比对）
+GET {{host}}/auth/internal/routes/version

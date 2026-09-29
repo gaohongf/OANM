@@ -35,6 +35,20 @@
             <artifactId>spring-cloud-starter-openfeign</artifactId>
         </dependency>
 
+        <!--
+          端点自注册: 各服务启动时把自己需要权限的端点上报给 service-auth。
+          用 Kafka 而不是直接调 HTTP, 是因为上报"丢不起" —— 漏一个端点, 那个端点就
+          永远没有权限行, 任何角色都无法被授予它, 而现象只是所有人都 403。
+          Kafka 能容忍 service-auth 当时不在（消息留在 broker 上, 等它起来再消费）。
+
+          放在 common 而不是各服务: 每个服务都要上报, 而且 service-auth 自己要用同一套
+          扫描逻辑（它的登记走本地实现, 不经 Kafka —— 见 LocalEndpointRegistration）。
+        -->
+        <dependency>
+            <groupId>org.springframework.kafka</groupId>
+            <artifactId>spring-kafka</artifactId>
+        </dependency>
+
         <!-- 解析结果的进程内一级缓存 (L1), 版本由 spring-boot-dependencies BOM 管理 -->
         <dependency>
             <groupId>com.github.ben-manes.caffeine</groupId>
@@ -69,6 +83,27 @@
             <groupId>cn.dev33</groupId>
             <artifactId>sa-token-spring-boot3-starter</artifactId>
             <version>${sa-token.version}</version>
+        </dependency>
+        <!--
+          sa-token 的会话存储必须放在 common 而不是各服务各自声明。
+
+          默认的 SaTokenDao 是内存实现, 只认本进程签发的 token。如果只有 service-auth 装了
+          Redis 实现, 那么 service-auth 登录拿到的 token 到了 service-work-order 里就是
+          "不认识的 token" —— StpUtil.getLoginId() 返回 null, 每个请求都 401。
+          各服务自校验这条路从根上就不成立。
+
+          另外这个 starter 只是把 SaTokenDao 换成 RedisTemplate 实现, 它本身不提供
+          Redis 连接; 连接由 spring-boot-starter-data-redis 提供 (父 pom 已全局声明)。
+        -->
+        <dependency>
+            <groupId>cn.dev33</groupId>
+            <artifactId>sa-token-redis-template</artifactId>
+            <version>${sa-token.version}</version>
+        </dependency>
+        <!-- sa-token-redis-template 用 RedisTemplate 时需要连接池 -->
+        <dependency>
+            <groupId>org.apache.commons</groupId>
+            <artifactId>commons-pool2</artifactId>
         </dependency>
         <dependency>
             <groupId>org.mapstruct</groupId>
