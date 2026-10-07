@@ -78,6 +78,7 @@ public class RoleServiceImpl implements RoleService {
         RoleEntity entity = roleDao.selectById(roleName);
         if (entity == null) {
             R.error(AuthRsm.ROLE_NOT_FOUND);
+            return;
         }
 
         // 只改 label。role_name 是主键且被 user_roles / role_permissions 以外键引用,

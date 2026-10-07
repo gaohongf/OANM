@@ -41,7 +41,7 @@ import lombok.extern.slf4j.Slf4j;
  * （都以 {@code /api/} 开头）, 所以这里不需要关心网关怎么转发。
  */
 @Slf4j
-public class AuthorizationInterceptor implements HandlerInterceptor {
+public class ServletAuthorizationInterceptor implements HandlerInterceptor {
 
     @Override
     public boolean preHandle(

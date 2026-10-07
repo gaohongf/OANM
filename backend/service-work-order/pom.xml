@@ -47,6 +47,16 @@
             <version>${parent.version}</version>
         </dependency>
         <dependency>
+            <groupId>com.lingyun</groupId>
+            <artifactId>rsm-mvc-spring-boot-starter</artifactId>
+            <version>${lingyun.version}</version>
+         </dependency>
+        <dependency>
+            <groupId>cn.dev33</groupId>
+            <artifactId>sa-token-spring-boot3-starter</artifactId>
+            <version>${sa-token.version}</version>
+        </dependency>
+        <dependency>
             <groupId>org.springframework.ai</groupId>
             <artifactId>spring-ai-starter-model-openai</artifactId>
          </dependency>

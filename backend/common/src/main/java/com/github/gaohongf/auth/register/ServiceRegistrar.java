@@ -8,7 +8,6 @@ import org.springframework.boot.context.event.ApplicationReadyEvent;
 import org.springframework.context.event.EventListener;
 import org.springframework.kafka.core.KafkaTemplate;
 import org.springframework.util.AntPathMatcher;
-import org.springframework.web.servlet.mvc.method.annotation.RequestMappingHandlerMapping;
 
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.github.gaohongf.auth.client.ApiResponse;
@@ -42,18 +41,18 @@ public class ServiceRegistrar {
      */
     private static final Duration STEP_TIMEOUT = Duration.ofSeconds(3);
 
-    private final RequestMappingHandlerMapping handlerMapping;
+    private final ServiceEndpointsScanner serviceEndpointsScanner;
     private final KafkaTemplate<String, String> kafkaTemplate;
     private final RegistrationClient registrationClient;
     private final ObjectMapper objectMapper;
     private final String instanceId;
 
-    public ServiceRegistrar(RequestMappingHandlerMapping handlerMapping,
+    public ServiceRegistrar(ServiceEndpointsScanner serviceEndpointsScanner,
                             KafkaTemplate<String, String> kafkaTemplate,
                             RegistrationClient registrationClient,
                             ObjectMapper objectMapper,
                             String instanceId) {
-        this.handlerMapping = handlerMapping;
+        this.serviceEndpointsScanner = serviceEndpointsScanner;
         this.kafkaTemplate = kafkaTemplate;
         this.registrationClient = registrationClient;
         this.objectMapper = objectMapper;
@@ -72,7 +71,7 @@ public class ServiceRegistrar {
      */
     @EventListener(ApplicationReadyEvent.class)
     public void registerOnStartup() {
-        ServiceEndpoints endpoints = ServiceEndpoints.scan(handlerMapping);
+        ServiceEndpoints endpoints = serviceEndpointsScanner.scan();
         if (endpoints.endpoints().isEmpty()) {
             log.info("本服务没有需要权限的端点，跳过自注册");
             return;

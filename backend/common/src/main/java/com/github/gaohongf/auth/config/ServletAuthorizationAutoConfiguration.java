@@ -9,7 +9,7 @@ import org.springframework.lang.NonNull;
 import org.springframework.web.servlet.config.annotation.InterceptorRegistry;
 import org.springframework.web.servlet.config.annotation.WebMvcConfigurer;
 
-import com.github.gaohongf.auth.interceptor.AuthorizationInterceptor;
+import com.github.gaohongf.auth.interceptor.ServletAuthorizationInterceptor;
 import com.github.gaohongf.auth.rsm.AuthRsm;
 
 /**
@@ -38,7 +38,7 @@ import com.github.gaohongf.auth.rsm.AuthRsm;
 @AutoConfiguration
 @ConditionalOnWebApplication(type = ConditionalOnWebApplication.Type.SERVLET)
 @ConditionalOnProperty(name = "oanm.auth.enabled", havingValue = "true", matchIfMissing = true)
-public class AuthorizationAutoConfiguration implements WebMvcConfigurer {
+public class ServletAuthorizationAutoConfiguration implements WebMvcConfigurer {
 
     /**
      * 注册认证相关的消息键。
@@ -55,7 +55,7 @@ public class AuthorizationAutoConfiguration implements WebMvcConfigurer {
 
     @Override
     public void addInterceptors(@NonNull InterceptorRegistry registry) {
-        registry.addInterceptor(new AuthorizationInterceptor())
+        registry.addInterceptor(new ServletAuthorizationInterceptor())
                 .addPathPatterns("/**");
     }
 }

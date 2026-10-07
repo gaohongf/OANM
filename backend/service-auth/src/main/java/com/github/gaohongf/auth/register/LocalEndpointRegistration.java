@@ -6,7 +6,6 @@ import org.springframework.boot.context.event.ApplicationReadyEvent;
 import org.springframework.context.event.EventListener;
 import org.springframework.stereotype.Component;
 import org.springframework.util.AntPathMatcher;
-import org.springframework.web.servlet.mvc.method.annotation.RequestMappingHandlerMapping;
 
 import com.github.gaohongf.auth.service.ApiRouteService;
 
@@ -35,14 +34,14 @@ import lombok.extern.slf4j.Slf4j;
 @AllArgsConstructor
 public class LocalEndpointRegistration {
 
-    private final RequestMappingHandlerMapping handlerMapping;
+    private final ServiceEndpointsScanner serviceEndpointsScanner;
     private final EndpointRegistrationService registrationService;
     private final ApiRouteService apiRouteService;
 
     @EventListener(ApplicationReadyEvent.class)
     public void registerOnStartup() {
         try {
-            ServiceEndpoints endpoints = ServiceEndpoints.scan(handlerMapping);
+            ServiceEndpoints endpoints = serviceEndpointsScanner.scan();
             if (endpoints.endpoints().isEmpty()) {
                 log.info("service-auth 没有需要权限的端点，跳过本地登记");
                 return;

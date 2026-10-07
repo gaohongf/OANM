@@ -55,6 +55,5 @@ public class ServiceRegistrationConsumer {
             log.debug("收到 {} 的自注册上报，{} 个端点均已登记过", registration.getInstanceId(),
                     registration.getAuths() == null ? 0 : registration.getAuths().size());
         }
-        // created 非空时 EndpointRegistrationService 里已经打了 INFO
     }
 }

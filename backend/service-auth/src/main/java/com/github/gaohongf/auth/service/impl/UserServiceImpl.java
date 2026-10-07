@@ -53,7 +53,6 @@ public class UserServiceImpl implements UserService {
 
     @Override
     public void createUser(CreateUserCommand command) {
-        command.check();
         if (userDao.exists(Wrappers.<UserEntity>lambdaQuery().eq(UserEntity::getUsername, command.getUsername()))) {
             R.error(AuthRsm.ACCOUNT_EXISTS);
         }

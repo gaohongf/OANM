@@ -11,8 +11,7 @@ public class ProblemDescriptionSuggestionsBuilder {
     private ObjectMapper objectMapper = new ObjectMapper();
 
     public String wash(String aiOutput) {
-        String cleaned = aiOutput.replaceAll("```json", "").replaceAll("```", "").trim();
-        return cleaned;
+        return aiOutput.replaceAll("```json", "").replaceAll("```", "").trim();
     }
 
     public ProblemDescriptionSuggestions build(String aiOutput) {

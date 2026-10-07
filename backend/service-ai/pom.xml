@@ -27,6 +27,11 @@
             <artifactId>spring-boot-starter-webflux</artifactId>
             <version>${spring-boot.version}</version>
         </dependency>
+        <dependency>
+            <groupId>cn.dev33</groupId>
+            <artifactId>sa-token-reactor-spring-boot3-starter</artifactId>
+            <version>${sa-token.version}</version>
+        </dependency>
          <dependency>
             <groupId>com.alibaba.cloud</groupId>
             <artifactId>spring-cloud-starter-alibaba-nacos-discovery</artifactId>
@@ -46,10 +51,17 @@
             <artifactId>spring-cloud-starter-loadbalancer</artifactId>
         </dependency>
         <dependency>
+                <groupId>com.lingyun</groupId>
+                <artifactId>lingyun-base-rsm</artifactId>
+                <version>${lingyun.version}</version>
+        </dependency>
+        <dependency>
             <groupId>com.github.gaohongf</groupId>
             <artifactId>common</artifactId>
             <version>${parent.version}</version>
         </dependency>
+        
+
     </dependencies>
     <properties>
         <maven.compiler.source>${java.version}</maven.compiler.source>

@@ -6,6 +6,7 @@ import org.springframework.data.redis.cache.RedisCacheManager;
 import org.springframework.data.redis.cache.RedisCacheWriter;
 import org.springframework.data.redis.core.StringRedisTemplate;
 import org.springframework.lang.NonNull;
+import org.springframework.lang.Nullable;
 
 import java.time.Duration;
 
@@ -25,7 +26,7 @@ public class EnhancedRedisCacheManager extends RedisCacheManager {
     @NonNull
     protected RedisCache createRedisCache(
             @NonNull String name,
-            RedisCacheConfiguration cacheConfiguration
+            @Nullable RedisCacheConfiguration cacheConfiguration
     ) {
         if (cacheConfiguration == null) {
             cacheConfiguration = getDefaultCacheConfiguration();

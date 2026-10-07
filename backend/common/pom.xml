@@ -17,8 +17,14 @@
             <groupId>com.lingyun</groupId>
             <artifactId>rsm-mvc-spring-boot-starter</artifactId>
             <version>${lingyun.version}</version>
+            <optional>true</optional>
         </dependency>
-
+        <dependency>
+            <groupId>org.springframework.boot</groupId>
+            <artifactId>spring-boot-starter-webflux</artifactId>
+            <version>${spring-boot.version}</version>
+            <optional>true</optional>
+        </dependency>
         <!--
           说明: Jackson / Servlet 之前全靠 rsm-mvc-spring-boot-starter 传递进来, 这里显式声明。
           序列化模块 (ResolveAutoConfiguration) 直接依赖 ObjectMapper 与
@@ -83,6 +89,13 @@
             <groupId>cn.dev33</groupId>
             <artifactId>sa-token-spring-boot3-starter</artifactId>
             <version>${sa-token.version}</version>
+            <optional>true</optional>
+        </dependency>
+        <dependency>
+            <groupId>cn.dev33</groupId>
+            <artifactId>sa-token-reactor-spring-boot3-starter</artifactId>
+            <version>${sa-token.version}</version>
+            <optional>true</optional>
         </dependency>
         <!--
           sa-token 的会话存储必须放在 common 而不是各服务各自声明。
