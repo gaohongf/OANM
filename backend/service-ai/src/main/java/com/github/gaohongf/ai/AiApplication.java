@@ -5,9 +5,11 @@ import org.springframework.boot.autoconfigure.SpringBootApplication;
 import org.springframework.cloud.client.discovery.EnableDiscoveryClient;
 import org.springframework.context.annotation.Import;
 
-import com.lingyun.base.rsm.RsmAutoConfiguration;
+import com.github.gaohongf.web.rsm.ReactiveResponseBuilder;
+import com.lingyun.base.rsm.annotation.EnableRsm;
 
-@Import(RsmAutoConfiguration.class)
+@Import(ReactiveResponseBuilder.class)
+@EnableRsm 
 @SpringBootApplication
 @EnableDiscoveryClient 
 public class AiApplication {

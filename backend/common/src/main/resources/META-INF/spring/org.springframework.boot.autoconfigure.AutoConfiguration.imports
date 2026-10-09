@@ -8,7 +8,9 @@ com.github.gaohongf.auth.satoken.RemoteStpInterfaceAutoConfiguration
 com.github.gaohongf.auth.satoken.AuthorityBroadcastAutoConfiguration
 com.github.gaohongf.auth.config.ServletAuthorizationAutoConfiguration
 com.github.gaohongf.auth.config.ReactiveAuthorizationAutoConfiguration
+com.github.gaohongf.auth.config.ReactiveRequestExceptionHandlerConfiguration
 com.github.gaohongf.auth.register.ServiceRegistrationAutoConfiguration
 com.github.gaohongf.auth.register.ServletServiceEndpointsScannerConfiguration
 com.github.gaohongf.auth.register.ReactiveServiceEndpointsScannerConfiguration
 com.github.gaohongf.auth.client.WebClientConfig
+com.github.gaohongf.web.rsm.config.RsmConfig
