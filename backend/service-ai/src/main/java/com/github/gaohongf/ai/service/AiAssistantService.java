@@ -7,5 +7,6 @@ import reactor.core.publisher.Flux;
 
 @Service 
 public interface AiAssistantService {
-    Flux<ServerSentEvent<String>> workOrderUserInputIntentInference(String userInput);
+    Flux<ServerSentEvent<String>> workOrderUserInputIntentInference(String id,String userInput);
+    Flux<ServerSentEvent<String>> workOrderSubmit(String id, Integer userSelect);
 }

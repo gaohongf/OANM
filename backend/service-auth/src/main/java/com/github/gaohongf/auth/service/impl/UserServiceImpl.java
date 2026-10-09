@@ -15,7 +15,7 @@ import org.springframework.util.StringUtils;
 import com.baomidou.mybatisplus.core.metadata.IPage;
 import com.baomidou.mybatisplus.core.toolkit.Wrappers;
 import com.baomidou.mybatisplus.extension.plugins.pagination.Page;
-import com.github.gaohongf.auth.entity.res.PageRes;
+import com.github.gaohongf.model.PageRes;
 import com.github.gaohongf.auth.entity.res.UserAdminRes;
 import com.github.gaohongf.auth.cache.CacheKeyConstants;
 import com.github.gaohongf.auth.dao.PermissionDao;

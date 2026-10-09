@@ -165,3 +165,78 @@ FROM DUAL WHERE NOT EXISTS (SELECT 1 FROM menus WHERE id = -35);
 -- ------------------------------------------------------------
 -- INSERT INTO user_roles (user_id, role_name, create_time, update_time, deleted, version)
 -- VALUES (<用户ID>, 'admin', NOW(), NOW(), 0, 0);
+
+-- ------------------------------------------------------------
+-- 6. AI 工单助手（意图推断 + 辅助填单）
+--
+--    这两个页面是 SSE 流式接口的界面, 和其它页面一样需要菜单 + 权限才能进去。
+-- ------------------------------------------------------------
+
+-- 6.1 页面要挂的权限。
+--     这两个键 service-ai 启动时会自注册出来, 那为什么还要在这里种一遍?
+--     因为种子脚本可能比服务先跑 —— 那时权限行还不存在, 6.2 的子查询就会取到 NULL,
+--     而 NULL 的 permission_id 意味着"登录即可见", 菜单会静默失去门禁(fail-open)。
+--     这里的 NOT EXISTS 保证了"谁先建都只有一行", 服务后来自注册时也会跳过。
+INSERT INTO permissions (id, permission_key, label, create_time, update_time, deleted, version)
+SELECT -8, 'GET:/api/ai/assistant/wo/uiii', '意图推断', NOW(), NOW(), 0, 0
+FROM DUAL WHERE NOT EXISTS (SELECT 1 FROM permissions WHERE permission_key = 'GET:/api/ai/assistant/wo/uiii');
+
+INSERT INTO permissions (id, permission_key, label, create_time, update_time, deleted, version)
+SELECT -9, 'GET:/api/ai/assistant/wo/assist-submit', 'AI 辅助填单', NOW(), NOW(), 0, 0
+FROM DUAL WHERE NOT EXISTS (SELECT 1 FROM permissions WHERE permission_key = 'GET:/api/ai/assistant/wo/assist-submit');
+
+-- 6.2 菜单。component 必须与前端 src/pages/ 下的文件路径逐字一致(大小写敏感):
+--     src/pages/ops/IntentInference.tsx → 'ops/IntentInference'
+--     src/pages/ops/AssistSubmit.tsx    → 'ops/AssistSubmit'
+INSERT INTO menus (id, parent_id, name, path, component, icon, sort, hidden, keep_alive, permission_id, enabled, locked, source, create_time, update_time, deleted, version)
+SELECT -22, -20, '智能提单', '/ops/ai/intent', 'ops/IntentInference', 'robot', 2, 0, 0,
+       (SELECT id FROM permissions WHERE permission_key = 'GET:/api/ai/assistant/wo/uiii'),
+       1, 0, 'MANUAL', NOW(), NOW(), 0, 0
+FROM DUAL WHERE NOT EXISTS (SELECT 1 FROM menus WHERE id = -22);
+
+INSERT INTO menus (id, parent_id, name, path, component, icon, sort, hidden, keep_alive, permission_id, enabled, locked, source, create_time, update_time, deleted, version)
+SELECT -23, -20, 'AI 辅助填单', '/ops/ai/submit', 'ops/AssistSubmit', 'robot', 3, 0, 0,
+       (SELECT id FROM permissions WHERE permission_key = 'GET:/api/ai/assistant/wo/assist-submit'),
+       1, 0, 'MANUAL', NOW(), NOW(), 0, 0
+FROM DUAL WHERE NOT EXISTS (SELECT 1 FROM menus WHERE id = -23);
+
+-- 6.3 网关路由。
+--
+--     按 path_pattern 判重而不是按 id: 已经跑起来的库里, 这几行是管理员在
+--     路由管理界面手工建的(雪花 id), 而这里是保留负 id。判重键选错的话,
+--     同一条前缀会出现两行, 网关拿到两条同序路由 —— 表现是随机的 404。
+--
+--     route_order 沿用现有库里的取值(ops 10 / ai 11 / auth 21): 数值越小越优先,
+--     彼此不重叠, 所以顺序只影响日志可读性, 但保持一致能避免"种子装的和我现在跑的
+--     不一样"这种难查的差异。
+INSERT INTO api_routes (id, name, path_pattern, uri, route_order, enabled, locked, source, create_time, update_time, deleted, version)
+SELECT -40, 'Work Order Service', '/api/ops/**', 'lb://service-work-order', 10, 1, 0, 'MANUAL', NOW(), NOW(), 0, 0
+FROM DUAL WHERE NOT EXISTS (SELECT 1 FROM api_routes WHERE path_pattern = '/api/ops/**');
+
+INSERT INTO api_routes (id, name, path_pattern, uri, route_order, enabled, locked, source, create_time, update_time, deleted, version)
+SELECT -41, 'AI Service', '/api/ai/**', 'lb://service-ai', 11, 1, 0, 'MANUAL', NOW(), NOW(), 0, 0
+FROM DUAL WHERE NOT EXISTS (SELECT 1 FROM api_routes WHERE path_pattern = '/api/ai/**');
+
+INSERT INTO api_routes (id, name, path_pattern, uri, route_order, enabled, locked, source, create_time, update_time, deleted, version)
+SELECT -42, 'Auth Service', '/api/auth/**', 'lb://service-auth', 21, 1, 0, 'MANUAL', NOW(), NOW(), 0, 0
+FROM DUAL WHERE NOT EXISTS (SELECT 1 FROM api_routes WHERE path_pattern = '/api/auth/**');
+
+-- ------------------------------------------------------------
+-- 7. 一次性修复: 删除两个已经不存在端点的权限行
+--
+--    service-ai 的两个端点现在挂在 /api/ai/assistant/wo/ 下, 之前是没有 /wo 这一段
+--    的旧路径(wouiii / wos)。自注册是"只增不删"的, 所以改动路径之后, 旧路径的权限行
+--    留在了库里 —— 它们永远不会再被匹配上, 但仍然<b>出现在权限管理界面里、仍然可以被授予</b>,
+--    授了也没有任何效果。
+--
+--    物理删除而不是置 deleted=1: permissions.permission_key 上有唯一键,
+--    墓碑行会让这个 key 日后重新注册时直接撞唯一键。
+-- ------------------------------------------------------------
+DELETE FROM role_permissions
+WHERE permission_id IN (SELECT id FROM permissions
+                        WHERE permission_key IN ('GET:/api/ai/assistant/wouiii',
+                                                 'GET:/api/ai/assistant/wos'));
+
+DELETE FROM permissions
+WHERE permission_key IN ('GET:/api/ai/assistant/wouiii',
+                         'GET:/api/ai/assistant/wos');

@@ -11,7 +11,7 @@ import org.springframework.web.bind.annotation.RestController;
 
 import com.github.gaohongf.auth.entity.req.CreateUserCommand;
 import com.github.gaohongf.auth.entity.req.GrantRolesCommand;
-import com.github.gaohongf.auth.entity.res.PageRes;
+import com.github.gaohongf.model.PageRes;
 import com.github.gaohongf.auth.entity.res.UserAdminRes;
 import com.github.gaohongf.auth.service.UserService;
 import com.lingyun.base.rsm.GenericRsm;

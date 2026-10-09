@@ -4,7 +4,7 @@ import org.springframework.stereotype.Service;
 
 import com.github.gaohongf.auth.entity.req.CreateUserCommand;
 import com.github.gaohongf.auth.entity.req.GrantRolesCommand;
-import com.github.gaohongf.auth.entity.res.PageRes;
+import com.github.gaohongf.model.PageRes;
 import com.github.gaohongf.auth.entity.res.UserAdminRes;
 import com.github.gaohongf.auth.res.UserAuthorities;
 import com.github.gaohongf.auth.res.UserRes;

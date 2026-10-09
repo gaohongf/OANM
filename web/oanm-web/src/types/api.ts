@@ -15,6 +15,33 @@ export interface RsmResponse<T> {
   type: 'SUCCESS' | 'WARN' | 'INFO' | 'ERROR'
 }
 
+/**
+ * 分页结果（后端 `PageRes<T>`）。
+ *
+ * 后端在 common 里只维护这一份形状（含"每页最多 200 条"这条策略），前端也照它对齐。
+ */
+export interface PageResult<T> {
+  total: number
+  current: number
+  size: number
+  records: T[]
+}
+
+/**
+ * 被后端 `@User` 解析过的用户字段。
+ *
+ * 它是**运行时才变形**的：库里只存 id，序列化时才换成用户对象。
+ * 解析成功是 `{id, username}`，解析失败（用户服务不可用）降级成 `{id}` ——
+ * 所以字段必须可选，而 `id` 也不该被当作可靠标识：用户 id 是雪花 id，
+ * 而 common 的解析器把它输出成 JSON 数字，超过 2^53 就已经丢精度了。
+ * 展示用户名没问题，拿它去查别的东西不行。
+ */
+export interface ResolvedUser {
+  id: number
+  username?: string
+  nickname?: string
+}
+
 /** 当前登录用户（后端 UserRes） */
 export interface CurrentUser {
   id: number

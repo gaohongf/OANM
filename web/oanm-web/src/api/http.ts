@@ -12,6 +12,18 @@ export function setUnauthorizedHandler(handler: () => void): void {
   onUnauthorized = handler
 }
 
+/**
+ * 通知上层"登录失效了"（清 token + 跳登录页）。
+ *
+ * SSE 走的是自己的 fetch 循环，用不了下面的 `request()`，但 401 的处理必须和这里
+ * 完全一致 —— 复制一份 clearToken + 回调的代码，两边迟早会漂移成"一处跳登录、
+ * 一处默默失败"。所以把动作本身导出去，让 `sse.ts` 复用。
+ */
+export function notifyUnauthorized(): void {
+  clearToken()
+  onUnauthorized?.()
+}
+
 export function getToken(): string | null {
   return localStorage.getItem(TOKEN_STORAGE_KEY)
 }
@@ -111,7 +123,13 @@ export async function request<T>(path: string, options: RequestOptions = {}): Pr
   return parsed.data as T
 }
 
-function buildUrl(path: string, query?: Record<string, string | number | undefined>): string {
+/**
+ * 拼查询串。
+ *
+ * 导出是因为 SSE 客户端（`sse.ts`）也要用它 —— 那边的参数同样有 `undefined` 要跳过，
+ * 而"URLSearchParams 会把 undefined 变成字面量 'undefined'"这个坑只该踩一次。
+ */
+export function buildUrl(path: string, query?: Record<string, string | number | undefined>): string {
   if (!query) {
     return path
   }

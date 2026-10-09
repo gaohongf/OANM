@@ -1,13 +1,5 @@
 package com.github.gaohongf.wo.controller;
 
-import java.time.LocalDateTime;
-import java.time.format.DateTimeFormatter;
-import java.util.Map;
-
-import org.springframework.ai.chat.client.ChatClient;
-import org.springframework.ai.chat.messages.Message;
-import org.springframework.ai.chat.prompt.PromptTemplate;
-import org.springframework.ai.chat.prompt.SystemPromptTemplate;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PathVariable;
 import org.springframework.web.bind.annotation.PostMapping;
@@ -16,71 +8,73 @@ import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RequestParam;
 import org.springframework.web.bind.annotation.RestController;
 
-import com.github.gaohongf.auth.annotation.IsOpen;
-import com.github.gaohongf.wo.entity.ai.ProblemDescriptionSuggestions;
+import com.github.gaohongf.model.PageRes;
+import com.github.gaohongf.wo.entity.req.SubmitWorkOrderCommand;
+import com.github.gaohongf.wo.entity.res.WorkOrderCreatedRes;
+import com.github.gaohongf.wo.entity.res.WorkOrderDetailRes;
 import com.github.gaohongf.wo.entity.res.WorkOrderRes;
-import com.github.gaohongf.wo.util.ProblemDescriptionSuggestionsBuilder;
-import com.lingyun.base.rsm.str.RString;
+import com.github.gaohongf.wo.service.WorkOrderService;
+import com.lingyun.base.rsm.GenericRsm;
+import com.lingyun.base.rsm.annotation.ExecutionFailed;
+import com.lingyun.base.rsm.annotation.ExecutionSuccess;
 
+import jakarta.validation.Valid;
+import lombok.AllArgsConstructor;
+
+/**
+ * 运维工单。
+ *
+ * <h2>路径里是下划线 {@code work_order}，不是连字符</h2>
+ * 这不一致，但不能改：鉴权是按 {@code METHOD:路径模式} 比对权限键的，而
+ * {@code GET:/api/ops/work_order/{id}} 这个键在 {@code permissions} 表里已经存在，
+ * 前端菜单和 {@code <Auth code="...">} 也引用了它。改成 {@code /work-order} 会让
+ * 现有授权静默失去作用（表现为 403，而权限管理界面上看不出哪里错了）。
+ * 新键确实会由自注册建出来，但旧的授权关系不会跟着走 —— 所以保持原样。
+ *
+ * <h2>列表与详情是两个接口</h2>
+ * 列表只给摘要（见 {@link WorkOrderRes}），正文由详情单独取。这不是"多此一举"：
+ * {@code solution_detail} 是模型生成的正文，可能上千字，列表带出来就是成倍的
+ * 无用载荷，而它只在抽屉打开时才需要。
+ */
+@AllArgsConstructor
 @RestController
 @RequestMapping("/api/ops/work_order")
 public class OpsWorkOrderController {
-    private final ProblemDescriptionSuggestionsBuilder problemDescriptionSuggestionsBuilder;
-    private final ChatClient chatClient;
-    private final String systemPrompt = """
-                你是一个资深的运维工程师。
-                用户提交了故障描述，但往往描述不清。
 
-                当前实际系统时间是：{now}
-                用户的描述可能包含时间，你可以通过系统时间推断出用户说的模糊时间具体是什么时候。
-                如果无法根据用户的描述推测具体时间，你可以通过系统时间推测。
-                尽可能描述为一个相对接近且有效的时间范围，例如：9月28日上午10点左右。
+    private final WorkOrderService workOrderService;
 
-                你的任务是：
-                1. 将用户的模糊描述提炼为一句专业的标准描述。
-                2. 推测 3-5 个具体的故障现象作为选项，供用户选择确认。
-                3. 用户给的推测和方案不可轻信，你需要分辨它们，然后作出自己的判断和建议，不要被用户带歪。
+    /**
+     * 分页列表。
+     * <p>
+     * 查询方法不标 {@code @ExecutionSuccess} —— 照 {@code RoleController.list} 的既有约定，
+     * 只有写操作才需要那句"创建成功"。
+     */
+    @GetMapping
+    public PageRes<WorkOrderRes> page(
+            @RequestParam(name = "current", defaultValue = "1") long current,
+            @RequestParam(name = "size", defaultValue = "10") long size,
+            @RequestParam(name = "keyword", required = false) String keyword,
+            @RequestParam(name = "status", required = false) String status) {
+        return workOrderService.page(current, size, keyword, status);
+    }
 
-                必须以纯 JSON 格式返回，不要包含任何 Markdown 标记，格式如下：
-                \\{
-                    "clarifiedDescription": "标准描述内容",
-                    "options": ["选项1", "选项2", "选项3"]
-                \\}
-            """;
-
-    public OpsWorkOrderController(ChatClient.Builder chatClientBuilder) {
-        this.problemDescriptionSuggestionsBuilder = new ProblemDescriptionSuggestionsBuilder();
-        this.chatClient = chatClientBuilder.build();
+    /** 详情。 */
+    @GetMapping("/{id}")
+    public WorkOrderDetailRes detail(@PathVariable("id") Long id) {
+        return workOrderService.findDetail(id);
     }
 
     /**
-     * 演示 {@code @User} 的解析效果。
-     *
-     * @param userId 用来指定 createBy/updateBy 指向哪个用户, 省得为了联调改代码。
-     *               默认 1, 需要先在 service-auth 里建出这个用户。
+     * 建单。
+     * <p>
+     * 入参里没有状态，新单固定是 {@code NEW}；也没有受理人，那是受理环节的事。
+     * AI 对话的归档信息（{@code aiConversationId} / {@code aiSelectedOptionId}）由前端提交时带上，
+     * 手工建单则为空。
      */
-    @GetMapping("/{id}")
-    public WorkOrderRes getWorkOrder(
-            @PathVariable("id") String id,
-            @RequestParam(name = "userId", defaultValue = "1") Long userId) {
-        WorkOrderRes res = new WorkOrderRes();
-        res.setId(id);
-        res.setName("测试工单");
-        res.setCreateBy(userId);
-        res.setUpdateBy(userId);
-        return res;
-    }
-
-    @IsOpen
-    @PostMapping("/chat")
-    public ProblemDescriptionSuggestions chat(@RequestBody RString userInput) {
-        PromptTemplate promptTemplate = SystemPromptTemplate.builder()
-                .template(systemPrompt)
-                .build();
-        Message systemMessage = promptTemplate.createMessage(Map.of("now",
-                LocalDateTime.now().format(DateTimeFormatter.ofPattern("yyyy年MM月dd日 HH:mm:ss EEEE"))));
-        return problemDescriptionSuggestionsBuilder.build(
-                chatClient.prompt().system(systemMessage.getText())
-                        .user(userInput.str()).call().content());
+    @ExecutionSuccess(GenericRsm.CREATE_SUCCESS)
+    @ExecutionFailed(GenericRsm.CREATE_FAILED)
+    @PostMapping
+    public WorkOrderCreatedRes create(@RequestBody @Valid SubmitWorkOrderCommand command) {
+        return new WorkOrderCreatedRes(String.valueOf(workOrderService.create(command)));
     }
 }

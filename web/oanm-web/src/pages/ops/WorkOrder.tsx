@@ -1,116 +1,317 @@
-import { useState } from 'react'
-import { App as AntdApp, Button, Card, Descriptions, InputNumber, Space, Tag, Typography } from 'antd'
+import { useCallback, useEffect, useState } from 'react'
+import {
+  App as AntdApp,
+  Button,
+  Card,
+  Descriptions,
+  Drawer,
+  Empty,
+  Input,
+  Select,
+  Skeleton,
+  Space,
+  Table,
+  Typography,
+} from 'antd'
+import { PlusOutlined, ReloadOutlined, SearchOutlined } from '@ant-design/icons'
+import { useNavigate } from 'react-router'
 
-import { request } from '../../api/http'
+import { AI_PERMISSIONS } from '../../api/ai'
+import {
+  formatDateTime,
+  getWorkOrder,
+  listWorkOrders,
+  splitRounds,
+  STATUS_OPTIONS,
+  WORK_ORDER_PERMISSIONS,
+} from '../../api/workOrder'
+import type { WorkOrderDetail, WorkOrderRow, WorkOrderStatus } from '../../api/workOrder'
+import { Auth } from '../../permission/Auth'
+import { PriorityTag, StatusTag, TypeTag, UserCell } from './components/WorkOrderCells'
 
-const { Text } = Typography
+const { Text, Paragraph } = Typography
 
-/** 工单（对应后端 WorkOrderRes） */
-interface WorkOrder {
-  id: string
-  name: string
-  /**
-   * 这两个字段在后端是 `@User Long`，序列化时会被替换成用户对象。
-   * 注意它是**运行时才变形**的：解析成功是 `{id, username, ...}`，
-   * 解析失败（用户服务不可用）会降级成 `{id}` —— 所以这里的类型要允许字段缺失。
-   */
-  createBy: ResolvedUser | null
-  updateBy: ResolvedUser | null
-}
-
-interface ResolvedUser {
-  id: number
-  username?: string
-  nickname?: string
-}
+// Select 只认 {value,label}，元数据里还带着颜色，这里摘一下
+const STATUS_SELECT_OPTIONS = STATUS_OPTIONS.map((item) => ({ value: item.value, label: item.label }))
 
 /**
- * 工单页。用来演示后端 `@User` 的字段解析效果。
+ * 工单列表。
  *
- * 注意这里展示的 `createBy` 后端只存了一个 id，是**序列化阶段**才被换成用户对象的 ——
- * 所以这一页同时也能反映用户服务是否可用：不可用时字段会降级成只剩 id（而不是报错）。
+ * ## 列表与详情是两个接口
+ * 表格只取摘要（标题/类型/优先级/状态/创建人/时间），正文（描述、解决方法）由抽屉
+ * 按 id 单独拉。原因是解决方法那一段是模型生成的长文，一页 10 行可能就有十几 KB，
+ * 而它们要打开抽屉才看得到。
+ *
+ * ## 创建人这一列在演示什么
+ * 库里只存了 `create_by` 的 id，是后端**序列化时**换成用户对象的。所以这一列同时也是
+ * 一块探针：service-auth 不可用时它会降级成「已降级 + id」，而不是整页报错。
+ *
+ * ## 分页与筛选
+ * 照仓库里其它列表页的写法：`onChange` 只改 state，重新拉取交给 `useEffect`；
+ * 换搜索词/换状态都要回到第 1 页，否则会停在一个"总数为 0 的第 5 页"上。
  */
 export default function WorkOrderPage() {
   const { message } = AntdApp.useApp()
-  // 后端这个演示端点的路径变量是工单号（固定 1），userId 是"把创建人/更新人解析成哪个用户"
-  const [userId, setUserId] = useState<number>(1)
-  const [order, setOrder] = useState<WorkOrder | null>(null)
-  const [loading, setLoading] = useState(false)
+  const navigate = useNavigate()
 
-  const load = async () => {
-    setLoading(true)
+  const [rows, setRows] = useState<WorkOrderRow[]>([])
+  const [total, setTotal] = useState(0)
+  const [current, setCurrent] = useState(1)
+  const [size, setSize] = useState(10)
+  const [keyword, setKeyword] = useState('')
+  const [status, setStatus] = useState<WorkOrderStatus | undefined>(undefined)
+  const [loading, setLoading] = useState(true)
+
+  const [drawerOpen, setDrawerOpen] = useState(false)
+  const [detail, setDetail] = useState<WorkOrderDetail | null>(null)
+  const [detailLoading, setDetailLoading] = useState(false)
+
+  const load = useCallback(
+    async ({ silent = false }: { silent?: boolean } = {}) => {
+      if (!silent) {
+        setLoading(true)
+      }
+      try {
+        const page = await listWorkOrders({
+          current,
+          size,
+          // 空串不要发过去 —— 后端会把它当成一个真的搜索词
+          keyword: keyword.trim() || undefined,
+          status,
+        })
+        setRows(page.records)
+        setTotal(page.total)
+      } catch (error) {
+        message.error(error instanceof Error ? error.message : '加载失败')
+      } finally {
+        setLoading(false)
+      }
+    },
+    [current, size, keyword, status, message],
+  )
+
+  useEffect(() => {
+    // 挂载时用 silent，避免在 effect 里同步 setState
+    // eslint-disable-next-line react/set-state-in-effect
+    void load({ silent: true })
+  }, [load])
+
+  const openDetail = async (row: WorkOrderRow) => {
+    setDrawerOpen(true)
+    setDetail(null)
+    setDetailLoading(true)
     try {
-      const data = await request<WorkOrder>('/api/ops/work_order/1', {
-        query: { userId },
-      })
-      setOrder(data)
+      setDetail(await getWorkOrder(row.id))
     } catch (error) {
-      message.error(error instanceof Error ? error.message : '加载失败')
+      message.error(error instanceof Error ? error.message : '加载详情失败')
+      // 拉不到就关掉抽屉，而不是留一个空的骨架在转
+      setDrawerOpen(false)
     } finally {
-      setLoading(false)
+      setDetailLoading(false)
     }
   }
 
   return (
     <Card
-      title="工单详情"
+      className="page-transition"
+      title="工单管理"
       extra={
-        <Space>
-          <Text type="secondary">解析成用户</Text>
-          <InputNumber
-            min={1}
-            value={userId}
-            onChange={(value) => setUserId(value ?? 1)}
-            style={{ width: 110 }}
-            addonBefore="id"
+        <Space wrap>
+          <Input.Search
+            allowClear
+            placeholder="按标题或描述搜索"
+            enterButton={<SearchOutlined />}
+            onSearch={(value) => {
+              setKeyword(value)
+              setCurrent(1)
+            }}
+            style={{ width: 240 }}
           />
-          <Button type="primary" loading={loading} onClick={load}>
-            加载
+          <Select<WorkOrderStatus>
+            allowClear
+            placeholder="全部状态"
+            options={STATUS_SELECT_OPTIONS}
+            value={status}
+            onChange={(value) => {
+              setStatus(value)
+              setCurrent(1)
+            }}
+            style={{ width: 140 }}
+          />
+          <Button icon={<ReloadOutlined />} onClick={() => void load()}>
+            刷新
           </Button>
+          {/* 建单目前只有 AI 这条路径，所以按钮直接把人送到智能提单的第一步 */}
+          <Auth code={AI_PERMISSIONS.intentInference}>
+            <Button type="primary" icon={<PlusOutlined />} onClick={() => navigate('/ops/ai/intent')}>
+              新建工单
+            </Button>
+          </Auth>
         </Space>
       }
     >
-      {!order ? (
-        <Text type="secondary">点「加载」请求一条工单。</Text>
-      ) : (
-        <Descriptions column={1} bordered size="small">
-          <Descriptions.Item label="名称">{order.name}</Descriptions.Item>
-          <Descriptions.Item label="创建人">
-            <UserCell user={order.createBy} />
-          </Descriptions.Item>
-          <Descriptions.Item label="更新人">
-            <UserCell user={order.updateBy} />
-          </Descriptions.Item>
-        </Descriptions>
-      )}
+      <Table<WorkOrderRow>
+        rowKey="id"
+        loading={loading}
+        dataSource={rows}
+        scroll={{ x: 'max-content' }}
+        pagination={{
+          current,
+          pageSize: size,
+          total,
+          showSizeChanger: true,
+          showTotal: (count) => `共 ${count} 条`,
+          onChange: (page, pageSize) => {
+            setCurrent(page)
+            setSize(pageSize)
+          },
+        }}
+        columns={[
+          { title: '标题', dataIndex: 'title', ellipsis: true },
+          {
+            title: '类型',
+            dataIndex: 'type',
+            width: 90,
+            render: (value: WorkOrderRow['type']) => <TypeTag type={value} />,
+          },
+          {
+            title: '优先级',
+            dataIndex: 'priority',
+            width: 90,
+            render: (value: WorkOrderRow['priority']) => <PriorityTag priority={value} />,
+          },
+          {
+            title: '状态',
+            dataIndex: 'status',
+            width: 100,
+            render: (value: WorkOrderRow['status']) => <StatusTag status={value} />,
+          },
+          {
+            title: '创建人',
+            dataIndex: 'createBy',
+            width: 140,
+            render: (_: unknown, record) => <UserCell user={record.createBy} />,
+          },
+          {
+            title: '创建时间',
+            dataIndex: 'createTime',
+            width: 170,
+            render: (value: unknown) => <Text type="secondary">{formatDateTime(value)}</Text>,
+          },
+          {
+            title: 'AI 会话',
+            dataIndex: 'aiConversationId',
+            width: 120,
+            render: (value: string | null) =>
+              value ? <Text type="secondary">有</Text> : <Text type="secondary">-</Text>,
+          },
+          {
+            title: '操作',
+            width: 90,
+            fixed: 'right',
+            render: (_, record) => (
+              <Auth code={WORK_ORDER_PERMISSIONS.detail}>
+                <Button type="link" size="small" onClick={() => void openDetail(record)}>
+                  详情
+                </Button>
+              </Auth>
+            ),
+          },
+        ]}
+      />
 
-      <Text type="secondary" style={{ display: 'block', marginTop: 16 }}>
-        创建人/更新人在库里只存了 id，是后端在序列化时换成用户对象的。
-        如果把 service-auth 停掉再加载，这里会降级成只显示 id —— 而不是报错。
-      </Text>
+      <Drawer
+        title="工单详情"
+        open={drawerOpen}
+        onClose={() => setDrawerOpen(false)}
+        // 窄屏铺满、宽屏固定宽度。用 CSS 的 min() 而不是 useBreakpoint：
+        // 这里只需要一个宽度，为此引入一套断点监听不划算
+        width="min(720px, 100%)"
+        destroyOnHidden
+      >
+        {detailLoading ? (
+          <Skeleton active paragraph={{ rows: 8 }} />
+        ) : detail === null ? (
+          <Empty image={Empty.PRESENTED_IMAGE_SIMPLE} description="没有取到详情" />
+        ) : (
+          <Descriptions
+            bordered
+            size="small"
+            column={{ xs: 1, sm: 1, md: 2 }}
+            items={[
+              { key: 'title', label: '标题', span: 2, children: detail.title },
+              { key: 'type', label: '类型', children: <TypeTag type={detail.type} /> },
+              { key: 'priority', label: '优先级', children: <PriorityTag priority={detail.priority} /> },
+              { key: 'status', label: '状态', children: <StatusTag status={detail.status} /> },
+              { key: 'createBy', label: '创建人', children: <UserCell user={detail.createBy} /> },
+              { key: 'createTime', label: '创建时间', children: formatDateTime(detail.createTime) },
+              {
+                key: 'aiOption',
+                label: '选中选项',
+                children: detail.aiSelectedOptionId === null ? '-' : `#${detail.aiSelectedOptionId}`,
+              },
+              {
+                key: 'conversation',
+                label: 'AI 会话 id',
+                span: 2,
+                children: detail.aiConversationId ? (
+                  // 可复制：拿它去 spring_ai_chat_memory 查这次对话的原貌
+                  <Text code copyable={{ text: detail.aiConversationId }}>
+                    {detail.aiConversationId}
+                  </Text>
+                ) : (
+                  <Text type="secondary">不是从 AI 对话创建的</Text>
+                ),
+              },
+              {
+                key: 'description',
+                label: '工单描述',
+                span: 2,
+                children: <Paragraph style={{ margin: 0 }}>{detail.problemDescription}</Paragraph>,
+              },
+              {
+                key: 'original',
+                label: '原始描述',
+                span: 2,
+                children: <OriginalRounds text={detail.originalProblemDescription} />,
+              },
+              {
+                key: 'solution',
+                label: '解决方法',
+                span: 2,
+                children: (
+                  <Paragraph style={{ margin: 0, whiteSpace: 'pre-wrap' }}>
+                    {detail.solutionDetail || '-'}
+                  </Paragraph>
+                ),
+              },
+            ]}
+          />
+        )}
+      </Drawer>
     </Card>
   )
 }
 
-/** 展示一个被后端解析过的用户字段。缺字段说明发生了降级。 */
-function UserCell({ user }: { user: ResolvedUser | null }) {
-  if (!user) {
-    return <Text type="secondary">无</Text>
-  }
-  if (!user.username) {
-    return (
-      <Space>
-        <Tag color="warning">已降级</Tag>
-        <Text>id={user.id}</Text>
-      </Space>
-    )
+/**
+ * 原始描述：一行一轮。
+ *
+ * 拆开逐轮标号显示，而不是整段丢进一个段落里 —— "第几轮补充的"本身就是信息，
+ * 混在一起看就丢了。空行跳过（写入时后端也会归一化，这是兜底）。
+ */
+function OriginalRounds({ text }: { text: string | null }) {
+  const rounds = splitRounds(text).filter((line) => line.trim() !== '')
+  if (rounds.length === 0) {
+    return <Text type="secondary">-</Text>
   }
   return (
-    <Space>
-      <Text strong>{user.nickname || user.username}</Text>
-      <Text type="secondary">
-        {user.username} (id={user.id})
-      </Text>
+    <Space direction="vertical" size={2} style={{ width: '100%' }}>
+      {rounds.map((line, index) => (
+        <Text key={`${index}-${line}`}>
+          <Text type="secondary">第 {index + 1} 轮：</Text>
+          {line}
+        </Text>
+      ))}
     </Space>
   )
 }

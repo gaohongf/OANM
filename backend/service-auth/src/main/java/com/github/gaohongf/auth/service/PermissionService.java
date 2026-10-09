@@ -1,7 +1,7 @@
 package com.github.gaohongf.auth.service;
 
 import com.github.gaohongf.auth.entity.req.SavePermissionCommand;
-import com.github.gaohongf.auth.entity.res.PageRes;
+import com.github.gaohongf.model.PageRes;
 import com.github.gaohongf.auth.entity.res.PermissionRes;
 
 /**

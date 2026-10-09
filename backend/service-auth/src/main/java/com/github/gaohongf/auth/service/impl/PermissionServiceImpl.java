@@ -13,7 +13,7 @@ import com.github.gaohongf.auth.dao.RolePermissionDao;
 import com.github.gaohongf.auth.entity.po.MenuEntity;
 import com.github.gaohongf.auth.entity.po.PermissionEntity;
 import com.github.gaohongf.auth.entity.req.SavePermissionCommand;
-import com.github.gaohongf.auth.entity.res.PageRes;
+import com.github.gaohongf.model.PageRes;
 import com.github.gaohongf.auth.entity.res.PermissionRes;
 import com.github.gaohongf.auth.mapstruct.PermissionConverter;
 import com.github.gaohongf.auth.rsm.AuthRsm;

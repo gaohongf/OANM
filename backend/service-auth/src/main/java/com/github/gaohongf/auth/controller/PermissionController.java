@@ -11,7 +11,7 @@ import org.springframework.web.bind.annotation.RequestParam;
 import org.springframework.web.bind.annotation.RestController;
 
 import com.github.gaohongf.auth.entity.req.SavePermissionCommand;
-import com.github.gaohongf.auth.entity.res.PageRes;
+import com.github.gaohongf.model.PageRes;
 import com.github.gaohongf.auth.entity.res.PermissionRes;
 import com.github.gaohongf.auth.service.PermissionService;
 import com.lingyun.base.rsm.GenericRsm;

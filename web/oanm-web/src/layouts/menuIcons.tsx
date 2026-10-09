@@ -3,6 +3,7 @@ import {
   AppstoreOutlined,
   DashboardOutlined,
   FileTextOutlined,
+  RobotOutlined,
   SettingOutlined,
   TeamOutlined,
   UserOutlined,
@@ -30,6 +31,7 @@ const ICONS: Record<string, ReactNode> = {
   user: <UserOutlined />,
   api: <ApiOutlined />,
   appstore: <AppstoreOutlined />,
+  robot: <RobotOutlined />,
 }
 
 const DEFAULT_ICON = <AppstoreOutlined />
