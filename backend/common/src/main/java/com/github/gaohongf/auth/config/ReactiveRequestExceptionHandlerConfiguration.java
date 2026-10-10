@@ -49,8 +49,6 @@ public class ReactiveRequestExceptionHandlerConfiguration {
 
     @ExceptionHandler(RequestException.class)
     public Mono<Response> handle(RequestException ex, ServerWebExchange exchange) {
-        // 换个重载就是这一处改动的全部: 状态码由 responseBuilder 按消息键写进响应。
-        // 响应体仍然是 build 的返回值, 由 Spring 的序列化管线写出去（适配器不参与, 见它的注释）。
         Response response = responseBuilder.build(
                 new ServerHttpResponseAdapter(exchange.getResponse()),
                 ex.getMsgId(), null, ex.getVarargs());
