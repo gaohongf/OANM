@@ -37,7 +37,7 @@
 |api-gateway|路由|8080|—|后端服务核心路由模块，只转发 `/api/**`|
 |service-auth|授权与鉴权管理|8084|`/api/auth`|管理用户-角色-权限-路由，提供授权服务|
 |service-work-order|工单|8090|`/api/ops`|工单的创建、流转与处理|
-|service-ai|AI|8085|`/api/ai`|对接大模型，提供工单智能分派等能力|
+|service-ai|AI|8085|`/api/ai`|对接大模型，提供意图分析等能力|
 |service-message|消息|8093|`/api/message`|站内消息通知的基础设施（模板渲染、落库、SSE 推送）|
 
 外部请求一律先到网关，由网关按 `/api/**` 前缀转发到对应服务；服务之间调用的内部接口放在
