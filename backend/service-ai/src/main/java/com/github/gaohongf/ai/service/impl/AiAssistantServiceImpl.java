@@ -9,8 +9,8 @@ import org.springframework.http.codec.ServerSentEvent;
 import org.springframework.stereotype.Service;
 
 import com.github.gaohongf.ai.service.AiAssistantService;
-import com.github.gaohongf.ai.util.Sse;
-import com.github.gaohongf.ai.util.SsePayload;
+import com.github.gaohongf.web.util.Sse;
+import com.github.gaohongf.web.util.SsePayload;
 import com.lingyun.base.rsm.exception.RequestException;
 
 import lombok.AllArgsConstructor;

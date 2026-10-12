@@ -6,7 +6,8 @@ import { request } from '../../api/http'
 import { Auth } from '../../permission/Auth'
 
 interface UserRow {
-  id: number
+  /** 字符串而不是数字：雪花 id 超过 2^53 在 JS 里会被取整，而这里要拿它拼 PUT 的路径 */
+  id: string
   username: string
   nickname: string
   locked: boolean

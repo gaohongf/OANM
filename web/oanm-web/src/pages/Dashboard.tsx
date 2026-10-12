@@ -31,10 +31,6 @@ export default function Dashboard() {
         </Descriptions.Item>
       </Descriptions>
 
-      <Paragraph type="secondary" style={{ marginTop: 16, marginBottom: 0 }}>
-        左侧菜单由后端按你的权限下发，所以这里看到的每一项都是你能访问的。
-        换一个没有权限的账号登录，菜单会相应地变少。
-      </Paragraph>
     </Card>
   )
 }

@@ -25,17 +25,6 @@ public class ReactiveServiceEndpointsScanner extends AbstractServiceEndpointsSca
     }
 
     /**
-     * Spring Boot 自带的错误页控制器。
-     * <p>
-     * 它是个 {@code @Controller}，所以会出现在 {@link RequestMappingHandlerMapping} 里，
-     * 但它不是业务端点：它是 ERROR 分发时用的，而鉴权拦截器明确跳过非 REQUEST 分发。
-     * 把它登记成权限会把 `/error` 变成一个可授予的权限项。
-     * <p>
-     * 用类名字符串比较而不是引用那个类：避免为了排除它而给 common 增加对
-     * spring-boot-autoconfigure 内部类的编译期依赖。
-     */
-    private static final String ERROR_CONTROLLER = "org.springframework.boot.autoconfigure.web.servlet.error.BasicErrorController";
-    /**
      * `@RequestMapping` 没指定方法时，展开成这些方法。
      * <p>
      * 必须展开成具体方法而不能记成 `*:/path`：拦截器是按真实请求方法推导权限键的
@@ -48,7 +37,7 @@ public class ReactiveServiceEndpointsScanner extends AbstractServiceEndpointsSca
     @Override
     public ServiceEndpoints scan() {
         Set<Endpoint> found = new LinkedHashSet<>();
-
+        
         for (var entry : handlerMapping.getHandlerMethods().entrySet()) {
             RequestMappingInfo mapping = entry.getKey();
             HandlerMethod handler = entry.getValue();
@@ -83,6 +72,6 @@ public class ReactiveServiceEndpointsScanner extends AbstractServiceEndpointsSca
                 || handler.getMethodAnnotation(LoginOnly.class) != null) {
             return true;
         }
-        return ERROR_CONTROLLER.equals(handler.getBeanType().getName());
+        return false;
     }
 }

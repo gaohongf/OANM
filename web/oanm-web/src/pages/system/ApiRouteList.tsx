@@ -6,7 +6,8 @@ import { request } from '../../api/http'
 import { Auth } from '../../permission/Auth'
 
 interface ApiRoute {
-  id: number
+  /** 字符串而不是数字：雪花 id 超过 2^53 在 JS 里会被取整，而这里要拿它拼 PUT/DELETE 的路径 */
+  id: string
   name: string
   pathPattern: string
   uri: string
@@ -112,7 +113,7 @@ export default function ApiRouteList() {
     }
   }
 
-  const onDelete = async (id: number) => {
+  const onDelete = async (id: string) => {
     try {
       await request<void>(`/api/auth/api-routes/${id}`, { method: 'DELETE' })
       message.success('删除成功')

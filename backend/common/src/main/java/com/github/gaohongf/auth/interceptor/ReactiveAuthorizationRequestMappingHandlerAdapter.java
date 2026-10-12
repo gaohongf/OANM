@@ -13,6 +13,7 @@ import org.springframework.web.server.ServerWebExchange;
 
 import com.github.gaohongf.auth.annotation.IsOpen;
 import com.github.gaohongf.auth.annotation.LoginOnly;
+import com.github.gaohongf.auth.model.CurrentLoginId;
 import com.github.gaohongf.auth.rsm.AuthRsm;
 import com.lingyun.base.rsm.HttpStatusRsm;
 import com.lingyun.base.rsm.exception.RequestException;
@@ -83,6 +84,12 @@ public class ReactiveAuthorizationRequestMappingHandlerAdapter extends RequestMa
             if (!StpUtil.isLogin()) {
                 return Mono.error(() -> new RequestException(AuthRsm.NOT_LOGIN));
             }
+
+            // 把登录 id 写进请求属性, 供控制器读取 —— 见 CurrentLoginId 的类注释:
+            // 这里是唯一可靠的取值点(上下文刚设好、线程可阻塞), 而控制器方法体是在
+            // 上面那个 finally 的 clearContext() 之后才被订阅执行的, 那里再调 sa-token 一定取不到。
+            // 放在 @LoginOnly 判断之前: 那一档同样需要知道"我是谁"。
+            exchange.getAttributes().put(CurrentLoginId.ATTRIBUTE, StpUtil.getLoginIdAsLong());
 
             // 第三档: 只要登录, 不要具体权限。放在登录判断之后 —— 它仍然要求已登录,
             // 只是不再往下走权限比对。典型用途是 /api/auth/me: 任何已登录用户都得能拿到

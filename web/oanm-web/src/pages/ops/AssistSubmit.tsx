@@ -507,12 +507,6 @@ export default function AssistSubmit() {
           />
         )}
 
-        <Paragraph style={{ margin: 0 }}>
-          <Text type="secondary">
-            提交后工单会落到 service-work-order，并带上这里的会话 id 便于日后回溯这次对话。
-          </Text>
-        </Paragraph>
-
         <Space>
           <Button type="primary" loading={submitting} disabled={streaming} onClick={() => void onSubmit()}>
             提交工单

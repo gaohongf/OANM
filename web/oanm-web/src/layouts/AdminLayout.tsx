@@ -4,6 +4,7 @@ import { App as AntdApp, Avatar, Breadcrumb, Button, Dropdown, Layout, Menu, Spi
 import type { MenuProps } from 'antd'
 import { LogoutOutlined, MenuFoldOutlined, MenuUnfoldOutlined, UserOutlined } from '@ant-design/icons'
 
+import { MessageBell } from '../components/MessageBell'
 import { collectPageNodes, type PageNode } from '../router/buildRoutes'
 import { useAuthStore } from '../store/auth'
 import { resolveIcon } from './menuIcons'
@@ -101,6 +102,10 @@ export function AdminLayout() {
           />
 
           <Breadcrumb items={breadcrumbItems} style={{ flex: 1 }} />
+
+          {/* 在面包屑与用户菜单之间。放在这里而不是侧边栏：消息是全局的，
+              它不属于任何一个菜单分支；而面包屑那一段是 flex:1，把它推到右边刚好 */}
+          <MessageBell />
 
           <Dropdown menu={{ items: userMenuItems, onClick: onUserMenuClick }} placement="bottomRight">
             <Button type="text">

@@ -1,6 +1,7 @@
 import {
   ApiOutlined,
   AppstoreOutlined,
+  BellOutlined,
   DashboardOutlined,
   FileTextOutlined,
   RobotOutlined,
@@ -32,6 +33,8 @@ const ICONS: Record<string, ReactNode> = {
   api: <ApiOutlined />,
   appstore: <AppstoreOutlined />,
   robot: <RobotOutlined />,
+  // 「消息中心」菜单用的图标（见 service-auth/db/seed.sql 第 8 段）
+  bell: <BellOutlined />,
 }
 
 const DEFAULT_ICON = <AppstoreOutlined />

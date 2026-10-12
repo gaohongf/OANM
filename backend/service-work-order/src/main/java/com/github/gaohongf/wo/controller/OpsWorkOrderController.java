@@ -46,10 +46,11 @@ public class OpsWorkOrderController {
     /**
      * 分页列表。
      * <p>
-     * 查询方法不标 {@code @ExecutionSuccess} —— 照 {@code RoleController.list} 的既有约定，
      * 只有写操作才需要那句"创建成功"。
      */
     @GetMapping
+    @ExecutionSuccess(GenericRsm.QUERY_SUCCESS)
+    @ExecutionFailed(GenericRsm.QUERY_FAILED)
     public PageRes<WorkOrderRes> page(
             @RequestParam(name = "current", defaultValue = "1") long current,
             @RequestParam(name = "size", defaultValue = "10") long size,
@@ -60,6 +61,8 @@ public class OpsWorkOrderController {
 
     /** 详情。 */
     @GetMapping("/{id}")
+    @ExecutionSuccess(GenericRsm.QUERY_SUCCESS)
+    @ExecutionFailed(GenericRsm.QUERY_FAILED)
     public WorkOrderDetailRes detail(@PathVariable("id") Long id) {
         return workOrderService.findDetail(id);
     }

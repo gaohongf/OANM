@@ -20,4 +20,22 @@
     <select id="selectByUsername" resultType="com.github.gaohongf.auth.entity.po.UserEntity">
         SELECT * FROM users WHERE username = #{username}
     </select>
+
+    <!--
+      按角色查收件人。join 条件里就把 deleted / locked 过滤掉, 而不是查回来再筛:
+      收件人列表可能很长, 把注定收不到通知的人带回来只是白走一趟序列化。
+      另外注意这是聚合查询, 用的是 SQL DISTINCT 而不是在 Java 端去重 —— user_roles 的主键是
+      (user_id, role_name), 同一个人不会有两行, 但 DISTINCT 让"这里只会返回不同的人"这件事
+      在 SQL 层面就成立, 不依赖调用方的记忆。
+    -->
+    <select id="selectUserIdsByRole" resultType="java.lang.Long">
+        SELECT DISTINCT u.id
+        FROM user_roles ur
+                 INNER JOIN users u ON u.id = ur.user_id
+            AND u.deleted = 0
+            AND u.locked = 0
+        WHERE ur.role_name = #{roleName}
+          AND ur.deleted = 0
+        ORDER BY u.id
+    </select>
 </mapper>

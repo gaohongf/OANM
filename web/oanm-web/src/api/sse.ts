@@ -22,6 +22,15 @@ export interface SseHandlers {
    */
   onDelta?: (line: string) => void
   onDone?: (reason: string) => void
+  /**
+   * 站内信推送。数据是**一条消息的 JSON 原文**（形状与收件箱列表的元素相同），
+   * 由调用方自己解析 —— 本模块不认识任何业务类型，`start` 会 `JSON.parse` 是因为
+   * 那个形状（会话 id + 模型名）是 SSE 协议本身的一部分。
+   *
+   * 解析失败时调用方应当安静地丢掉这一帧：推来的这条和轮询拉到的会合并去重，
+   * 丢一帧不会让消息消失。
+   */
+  onNotification?: (data: string) => void
   /** 流内业务错误、报文解析错误、网络错误都从这里出来 */
   onError?: (message: string) => void
 }
@@ -55,7 +64,7 @@ export interface OpenSseOptions extends SseHandlers {
  * 调用方只需要写一处错误处理。setup 阶段的失败（网络、非 2xx）也在内部转成 onError。
  */
 export async function openSse(path: string, options: OpenSseOptions): Promise<void> {
-  const { signal, onStart, onDelta, onDone, onError } = options
+  const { signal, onStart, onDelta, onDone, onNotification, onError } = options
   const url = buildUrl(path, options.query)
   const fail = (message: string) => onError?.(message)
 
@@ -144,6 +153,9 @@ export async function openSse(path: string, options: OpenSseOptions): Promise<vo
         return
       case 'done':
         onDone?.(parseReason(data))
+        return
+      case 'notification':
+        onNotification?.(data)
         return
       case 'error':
         fail(data || 'AI 服务返回了一个未知错误')

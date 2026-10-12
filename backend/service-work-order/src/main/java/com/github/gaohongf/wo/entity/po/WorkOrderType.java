@@ -13,14 +13,37 @@ import java.util.Optional;
  * <h2>存的是 {@code name()} 而不是序号</h2>
  * MyBatis 的 {@code EnumTypeHandler} 把枚举存成名字。没用序号是因为序号会随
  * 枚举里加一行就整体错位 —— 那种错误不会报错，只会让历史数据的意思悄悄改变。
+ * {@code label} 是个普通字段，不影响这个存法。
+ *
+ * <h2>{@code label} 为什么在后端也有一份</h2>
+ * 仓库的约定是「代码在链路上跑，中文在展示层翻」，前端 {@code TYPE_OPTIONS} 那份映射
+ * 仍然是前端显示的唯一依据。这里多一份只有一个理由：<b>服务端要自己生成一段给用户看的文本</b> ——
+ * 建单通知的正文是 service-message 用模板渲染的，那里不该也不认识 {@link WorkOrderType}，
+ * 所以中文只能由生产方当参数传过去（见 {@code WorkOrderCreatedNotifier}）。
+ * <p>
+ * 代价说清楚：{@code DEMAND/FAULT} 的中文现在存在于两处（这里和前端那张表）。
+ * 缓解它的是位置 —— 加第三种类型的人一定会改这个文件，改的时候 {@code label} 就在同一行；
+ * 而如果把它写在通知器里，加类型时最容易忘的恰恰是那个文件。前端加类型时也仍然要改
+ * 它自己那张表（否则列表和填单页显示不出新类型），所以这不会成为唯一一处"忘了改"。
  */
 public enum WorkOrderType {
 
     /** 需求 */
-    DEMAND,
+    DEMAND("需求"),
 
     /** 故障 */
-    FAULT;
+    FAULT("故障");
+
+    /** 给用户看的中文名。用于服务端拼装展示文本（如站内信正文），不参与存储与传输。 */
+    private final String label;
+
+    WorkOrderType(String label) {
+        this.label = label;
+    }
+
+    public String label() {
+        return label;
+    }
 
     /**
      * 宽松解析。

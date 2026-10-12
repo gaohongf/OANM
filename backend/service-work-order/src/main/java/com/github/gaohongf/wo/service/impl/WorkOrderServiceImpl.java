@@ -4,6 +4,7 @@ import java.util.Arrays;
 import java.util.Optional;
 import java.util.stream.Collectors;
 
+import org.springframework.context.ApplicationEventPublisher;
 import org.springframework.stereotype.Service;
 import org.springframework.util.StringUtils;
 
@@ -19,6 +20,7 @@ import com.github.gaohongf.wo.entity.req.SubmitWorkOrderCommand;
 import com.github.gaohongf.wo.entity.res.WorkOrderDetailRes;
 import com.github.gaohongf.wo.entity.res.WorkOrderRes;
 import com.github.gaohongf.wo.mapstruct.WorkOrderConverter;
+import com.github.gaohongf.wo.mq.WorkOrderCreatedEvent;
 import com.github.gaohongf.wo.rsm.WorkOrderRsm;
 import com.github.gaohongf.wo.service.WorkOrderService;
 import com.lingyun.base.rsm.R;
@@ -31,6 +33,7 @@ public class WorkOrderServiceImpl implements WorkOrderService {
 
     private final WorkOrderDao workOrderDao;
     private final WorkOrderConverter workOrderConverter;
+    private final ApplicationEventPublisher eventPublisher;
 
     @Override
     public PageRes<WorkOrderRes> page(long current, long size, String keyword, String status) {
@@ -74,6 +77,14 @@ public class WorkOrderServiceImpl implements WorkOrderService {
 
         // ASSIGN_ID 在插入前就把雪花 id 填回 entity, 所以插入后能直接取
         workOrderDao.insert(entity);
+
+        // 建单之后要做的旁路事情(通知超管)由事件带出去 —— 这里不认识消息模块,
+        // 消息发不出去也不会影响建单, 理由见 WorkOrderCreatedNotifier。
+        // createBy 用的是实体上那个审计字段而不是再取一次登录态: 它就是插入时写入的建单人,
+        // 此刻一定已经有了（取不到登录态时为 null, 那时通知按系统消息发）。
+        eventPublisher.publishEvent(new WorkOrderCreatedEvent(
+                entity.getId(), entity.getTitle(), entity.getType(), entity.getCreateBy()));
+
         return entity.getId();
     }
 

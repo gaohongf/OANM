@@ -240,3 +240,34 @@ WHERE permission_id IN (SELECT id FROM permissions
 DELETE FROM permissions
 WHERE permission_key IN ('GET:/api/ai/assistant/wouiii',
                          'GET:/api/ai/assistant/wos');
+
+-- ------------------------------------------------------------
+-- 8. 消息中心（站内信）
+--
+--    这一段只有菜单和网关路由, <b>没有权限行</b> —— 这是刻意的:
+--    读自己的收件箱是"登录就该能做"的事(与"取自己的菜单"同类), 不应当要求被授权,
+--    否则新建的账号必须先被授一个站内信权限才收得到通知, 而这个前置条件没有任何道理。
+--    所以那些端点标的是 @LoginOnly, 自注册的扫描器会直接跳过它们（它只收需要权限的端点）,
+--    权限管理界面里也不会出现一堆没人该去授权的行。
+-- ------------------------------------------------------------
+
+-- 8.1 顶级菜单。
+--     sort 5: 排在"概览"(1)之后、"运维管理"(10)之前 —— 消息是每天要看的东西,
+--     不该沉在管理菜单下面。
+--     icon 是 'bell', 它必须同时存在于前端 layouts/menuIcons.tsx 的白名单里,
+--     否则会退化成默认图标（不会报错, 只是长得不对）。
+INSERT INTO menus (id, parent_id, name, path, component, icon, sort, hidden, keep_alive, permission_id, enabled, locked, source, create_time, update_time, deleted, version)
+SELECT -50, NULL, '消息中心', '/message/list', 'message/NotificationList', 'bell', 5, 0, 0, NULL, 1, 0, 'MANUAL', NOW(), NOW(), 0, 0
+FROM DUAL WHERE NOT EXISTS (SELECT 1 FROM menus WHERE id = -50);
+
+-- 8.2 网关路由。
+--     route_order 12: 与现有取值(ops 10 / ai 11 / auth 21)同一套约定, 数值越小越优先,
+--     彼此不重叠。判重按 path_pattern 而不是按 id —— 已经跑起来的库里这一行可能是
+--     管理员在路由管理界面手工建的(雪花 id), 而这里是保留负 id; 判重键选错的话,
+--     同一条前缀会出现两行, 网关拿到两条同序路由, 表现是随机的 404。
+--
+--     网关只路由 /api/**（/auth/internal/** 因此天然不可达）, 而站内信的端点都在
+--     /api/message/** 下, 所以这里的前缀就是安全边界本身。
+INSERT INTO api_routes (id, name, path_pattern, uri, route_order, enabled, locked, source, create_time, update_time, deleted, version)
+SELECT -43, 'Message Service', '/api/message/**', 'lb://service-message', 12, 1, 0, 'MANUAL', NOW(), NOW(), 0, 0
+FROM DUAL WHERE NOT EXISTS (SELECT 1 FROM api_routes WHERE path_pattern = '/api/message/**');

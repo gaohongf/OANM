@@ -16,13 +16,17 @@ import lombok.NoArgsConstructor;
  * <p>
  * 后端一次读出整页用户的角色，靠的是一次 `IN (...)` 查询后按 user_id 分组，
  * 不是每个用户查一次 —— 否则一页 20 个用户就是 20 次查询。
+ *
+ * <h2>id 为什么是 String 而不是 Long</h2>
+ * 理由与 {@code WorkOrderRes} 上那段相同: 雪花 id 序列化成 JSON 数字后 JS 端会丢精度。
+ * 这里要紧是因为前端会把它拼进 {@code PUT /users/{id}/roles} —— 分配角色的对象可能因此错人。
  */
 @Data
 @AllArgsConstructor
 @NoArgsConstructor
 public class UserAdminRes {
 
-    private Long id;
+    private String id;
 
     private String username;
 

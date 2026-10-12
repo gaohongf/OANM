@@ -13,4 +13,5 @@ com.github.gaohongf.auth.register.ServiceRegistrationAutoConfiguration
 com.github.gaohongf.auth.register.ServletServiceEndpointsScannerConfiguration
 com.github.gaohongf.auth.register.ReactiveServiceEndpointsScannerConfiguration
 com.github.gaohongf.auth.client.WebClientConfig
-com.github.gaohongf.web.rsm.config.RsmConfig
+com.github.gaohongf.web.rsm.config.ReactiveRsmWriterConfig
+com.github.gaohongf.message.publish.MessagePublishAutoConfiguration

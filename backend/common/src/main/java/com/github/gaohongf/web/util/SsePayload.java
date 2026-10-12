@@ -1,4 +1,4 @@
-package com.github.gaohongf.ai.util;
+package com.github.gaohongf.web.util;
 
 import lombok.AllArgsConstructor;
 import lombok.Data;

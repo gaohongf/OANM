@@ -146,7 +146,8 @@ export interface WorkOrderDetail extends WorkOrderRow {
   originalProblemDescription: string | null
   solutionDetail: string | null
   aiSelectedOptionId: number | null
-  assigneeId: number | null
+  /** 处理人 id。字符串而不是数字：它是雪花用户 id，见 `ResolvedUser` 上那段说明。 */
+  assigneeId: string | null
   assigneeNote: string | null
 }
 

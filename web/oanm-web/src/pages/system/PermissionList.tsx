@@ -6,7 +6,8 @@ import { request } from '../../api/http'
 import { Auth } from '../../permission/Auth'
 
 interface Permission {
-  id: number
+  /** 字符串而不是数字：雪花 id 超过 2^53 在 JS 里会被取整，而这里要拿它拼 PUT/DELETE 的路径 */
+  id: string
   permissionKey: string
   label: string
   /** 内置的超管权限（键为 *），不允许改名或删除。由后端计算，不是存出来的字段。 */
@@ -112,7 +113,7 @@ export default function PermissionList() {
     }
   }
 
-  const onDelete = async (id: number) => {
+  const onDelete = async (id: string) => {
     try {
       await request<void>(`/api/auth/permissions/${id}`, { method: 'DELETE' })
       message.success('删除成功')

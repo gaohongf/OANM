@@ -1,4 +1,4 @@
-package com.github.gaohongf.ai.util;
+package com.github.gaohongf.web.util;
 
 import java.util.Map;
 
@@ -15,6 +15,11 @@ public final class Sse {
     public static final String EVENT_DELTA = "delta";
     public static final String EVENT_DONE = "done";
     public static final String EVENT_ERROR = "error";
+    /**
+     * 站内信推送。事件名与前端 {@code sse.ts} 的 {@code switch} 逐字对应 ——
+     * 那边对不认识的事件名是<b>安静跳过</b>的, 所以这里改了名字不会报错, 只会静默收不到。
+     */
+    public static final String EVENT_NOTIFICATION = "notification";
 
     public static final String DONE_REASON_KEY = "reason";
     public static final String DONE_REASON_SUCCESS = "success";
@@ -38,6 +43,21 @@ public final class Sse {
 
     public static ServerSentEvent<String> error(String error) {
         return standardize(EVENT_ERROR, error);
+    }
+
+    /**
+     * 一条站内信。
+     * <p>
+     * 收的是<b>已经序列化好的 JSON</b> 而不是对象: 站内信里有时间字段, 而本类那个静态
+     * {@link ObjectMapper} 没装 JavaTimeModule, 拿它序列化 {@code LocalDateTime} 会抛异常
+     * 然后被 {@link #toJson} 吞成 {@code "{}"} —— 客户端会收到一条内容为空的消息, 且不报错。
+     * 所以序列化交给调用方用 Spring 容器里那个 ObjectMapper（它装了 JavaTimeModule,
+     * 也带着本项目的序列化定制）。
+     *
+     * @param json 一条消息的 JSON
+     */
+    public static ServerSentEvent<String> notification(String json) {
+        return standardize(EVENT_NOTIFICATION, json);
     }
 
     /**

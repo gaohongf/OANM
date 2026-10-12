@@ -132,7 +132,9 @@ public class ApiRouteServiceImpl implements ApiRouteService {
 
     private static ApiRouteRes toRes(ApiRouteEntity entity) {
         return new ApiRouteRes(
-                entity.getId(),
+                // 雪花 id 出网必须走字符串, 理由见 ApiRouteRes 的类注释。
+                // 这里不用判空: 能查到就一定有主键
+                String.valueOf(entity.getId()),
                 entity.getName(),
                 entity.getPathPattern(),
                 entity.getUri(),

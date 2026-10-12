@@ -22,6 +22,21 @@ public final class KafkaTopics {
      */
     public static final String SERVICE_REGISTRATION = "oanm.service.registration";
 
+    /**
+     * 创建一条站内信的需求。
+     * <p>
+     * 消费者是 service-message（固定消费组 {@code oanm-service-message}，一条需求只该被处理一次）。
+     * <p>
+     * 消息体是 {@code MessageCreateCommand} 的 JSON，<b>与上面的自注册话题同样是"String + 手动 Jackson"</b>
+     * （{@code KafkaTemplate<String,String>}），刻意<b>不</b>带 Kafka 的类型头：用 {@code JsonSerializer}
+     * 的话消息头里会写上类的全限定名，消费端据此选类型，于是消息与包名绑死 —— 改一次包名，
+     * broker 上积压的历史消息就再也处理不了了。
+     * <p>
+     * 消息 <b>key 用收件人 id</b>：同一个用户的通知落在同一分区上、保持顺序；将来加分区分片时
+     * 这个选择仍然成立，不需要动消费端。
+     */
+    public static final String SERVICE_CREATE_MESSAGE_APP = "oanm.service.message.create";
+
     private KafkaTopics() {
     }
 }

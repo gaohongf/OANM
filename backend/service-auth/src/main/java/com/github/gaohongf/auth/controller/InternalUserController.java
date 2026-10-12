@@ -1,5 +1,7 @@
 package com.github.gaohongf.auth.controller;
 
+import java.util.List;
+
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PathVariable;
 import org.springframework.web.bind.annotation.RequestMapping;
@@ -54,5 +56,25 @@ public class InternalUserController {
     @GetMapping("/{id}/authorities")
     public UserAuthorities findAuthorities(@PathVariable("id") Long id) {
         return userService.findAuthorities(id);
+    }
+
+    /**
+     * 按角色查用户 id 列表（已封号/已删除的不在其中）。
+     * <p>
+     * 用途是"给某个角色的全部成员发通知"：由消息的生产方（例如 service-work-order）调它
+     * 把角色展开成收件人列表，再逐条投递。收件人解析刻意放在生产方而不是消息模块 ——
+     * 消息模块因此不需要在消费路径上依赖本服务的可用性。
+     * <p>
+     * 与 {@link #findAuthorities} 同一条约定：查不到（角色没有成员）返回<b>空列表</b>而不是 null，
+     * 调用方不必区分"没有成员"和"没有这个角色" —— 两种情况下都只是"没人要通知"。
+     * <p>
+     * 路径常量 {@code AuthInternalApi.USERS_BY_ROLE} 是<b>相对</b>本类 {@code @RequestMapping}
+     * 前缀的中段，与服务端/Feign 客户端共用，避免两边路径写歪（写歪的症状是 Feign 侧 404
+     * 而本服务完全正常）。
+     */
+    @IsOpen
+    @GetMapping(AuthInternalApi.USERS_BY_ROLE)
+    public List<Long> findUserIdsByRole(@PathVariable("roleName") String roleName) {
+        return userService.findUserIdsByRole(roleName);
     }
 }

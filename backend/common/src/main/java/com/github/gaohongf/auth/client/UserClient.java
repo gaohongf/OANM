@@ -1,5 +1,7 @@
 package com.github.gaohongf.auth.client;
 
+import java.util.List;
+
 import org.springframework.cloud.openfeign.FeignClient;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PathVariable;
@@ -39,4 +41,16 @@ public interface UserClient {
      */
     @GetMapping("/{id}/authorities")
     ApiResponse<UserAuthorities> findAuthorities(@PathVariable("id") Long id);
+
+    /**
+     * 按角色名查用户 id 列表（已封号/已删除的用户不在其中）。
+     * <p>
+     * 用于"给某个角色的全部成员发通知"。返回空列表表示这个角色目前没有成员 ——
+     * 那是正常情况（不该当失败处理），调用方按"没人要通知"走。
+     * <p>
+     * 注意这条路是<b>同步</b>的：调用方要么在能阻塞的线程上（servlet 服务本来就允许），
+     * 要么自己挪到 {@code boundedElastic}（反应式服务上的做法见鉴权适配器的类注释）。
+     */
+    @GetMapping(AuthInternalApi.USERS_BY_ROLE)
+    ApiResponse<List<Long>> findUserIdsByRole(@PathVariable("roleName") String roleName);
 }

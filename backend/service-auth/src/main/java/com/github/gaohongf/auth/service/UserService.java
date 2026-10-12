@@ -1,5 +1,7 @@
 package com.github.gaohongf.auth.service;
 
+import java.util.List;
+
 import org.springframework.stereotype.Service;
 
 import com.github.gaohongf.auth.entity.req.CreateUserCommand;
@@ -29,6 +31,14 @@ public interface UserService {
      * 内部端点都走这里, 免得两处各拼一遍、日后加一种授权来源时漏改其中一处。
      */
     UserAuthorities findAuthorities(Long id);
+
+    /**
+     * 查持有某角色的全部用户 id（已封号/已删除的不在其中）。
+     * <p>
+     * 供"给某个角色的全部成员发通知"用。返回空集合表示这个角色当前没有成员 ——
+     * 那是正常情况，调用方按"没人要通知"处理，不要当成失败。
+     */
+    List<Long> findUserIdsByRole(String roleName);
 
     /**
      * 给用户授角色, <b>整体替换</b>（传空集合等于收回该用户的全部角色）。

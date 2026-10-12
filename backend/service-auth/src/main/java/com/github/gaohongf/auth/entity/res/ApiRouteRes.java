@@ -9,13 +9,17 @@ import lombok.NoArgsConstructor;
  * <p>
  * 注意这里<b>没有</b>权限字段: 路由的粒度是服务前缀, 一个前缀不对应单一权限。
  * 端点级的权限在 {@code permissions} 表里, 键形如 {@code GET:/api/ops/work_order/{id}}。
+ *
+ * <h2>id 为什么是 String 而不是 Long</h2>
+ * 理由与 {@code WorkOrderRes} 上那段相同: 雪花 id 序列化成 JSON 数字后, JS 端会丢精度,
+ * 而前端拿它去拼 {@code PUT /api-routes/{id}} 与删除 —— 精度丢了就会打到别的行上。
  */
 @Data
 @AllArgsConstructor
 @NoArgsConstructor
 public class ApiRouteRes {
 
-    private Long id;
+    private String id;
 
     /** 备注名 */
     private String name;

@@ -210,8 +210,8 @@ public class MenuServiceImpl implements MenuService {
 
     private static MenuRes toRes(MenuEntity entity, Map<Long, String> permissionKeys) {
         MenuRes res = new MenuRes();
-        res.setId(entity.getId());
-        res.setParentId(entity.getParentId());
+        res.setId(idText(entity.getId()));
+        res.setParentId(idText(entity.getParentId()));
         res.setName(entity.getName());
         res.setPath(entity.getPath());
         res.setComponent(entity.getComponent());
@@ -219,7 +219,7 @@ public class MenuServiceImpl implements MenuService {
         res.setSort(entity.getSort());
         res.setHidden(entity.getHidden());
         res.setKeepAlive(entity.getKeepAlive());
-        res.setPermissionId(entity.getPermissionId());
+        res.setPermissionId(idText(entity.getPermissionId()));
         // 必须先判 null 再 get。permissionId 为 null 表示"登录即可见", 是常见情况;
         // 而 loadPermissionKeys 在没有权限时返回 Map.of(), 那是<b>不可变</b> Map ——
         // 它的 get(null) 会抛 NullPointerException（ImmutableCollections.MapN 里有 requireNonNull）,
@@ -232,6 +232,18 @@ public class MenuServiceImpl implements MenuService {
         res.setSource(entity.getSource());
         res.setChildren(List.of());
         return res;
+    }
+
+    /**
+     * 雪花 id 出网必须走字符串, 理由见 {@code MenuRes} 的类注释。
+     * <p>
+     * 不能直接用 {@code String.valueOf}: 这里的 {@code parentId} 和 {@code permissionId}
+     * 都<b>可空</b>(顶级菜单、以及"登录即可见"的菜单), 而 {@code String.valueOf((Long) null)}
+     * 返回的是字符串 {@code "null"} —— 前端会当真, 拿它去当父节点 id 或者权限 id。
+     * 编译期不会有任何提示, 所以这个转换必须集中在这里做。
+     */
+    private static String idText(Long id) {
+        return id == null ? null : String.valueOf(id);
     }
 
     private void applyCommand(MenuEntity entity, SaveMenuCommand command) {

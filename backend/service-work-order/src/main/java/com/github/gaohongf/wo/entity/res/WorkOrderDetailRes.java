@@ -30,7 +30,14 @@ public class WorkOrderDetailRes extends WorkOrderRes {
     /** 用户在意图推断里选中的选项 id；手工建单时为 null */
     private Integer aiSelectedOptionId;
 
-    private Long assigneeId;
+    /**
+     * 处理人 id。
+     * <p>
+     * String 而不是 Long: 它是用户 id(雪花 id), 理由同 {@link WorkOrderRes#getId()}。
+     * 与上面的 {@code aiSelectedOptionId} 不同 —— 那个是 AI 选项的序号(1、2、3),
+     * 小到不会有精度问题, 该保持数字。
+     */
+    private String assigneeId;
 
     private String assigneeNote;
 }

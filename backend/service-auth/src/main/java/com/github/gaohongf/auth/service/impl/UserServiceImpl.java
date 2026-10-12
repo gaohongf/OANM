@@ -97,6 +97,19 @@ public class UserServiceImpl implements UserService {
                 permissionDao.selectPermissionKeysByUserId(id));
     }
 
+    /**
+     * 刻意<b>不加 {@code @Cacheable}</b>：收件人列表是"发通知的那一瞬间"的快照，
+     * 缓存它意味着"刚给某人授了 admin，他的通知却要等缓存过期才发得出去"。
+     * 调用方（生产方的发布器）本来就不是高频路径 —— 建单这类业务动作才触发一次。
+     */
+    @Override
+    public List<Long> findUserIdsByRole(String roleName) {
+        if (!StringUtils.hasText(roleName)) {
+            return List.of();
+        }
+        return userDao.selectUserIdsByRole(roleName);
+    }
+
     @Override
     public PageRes<UserAdminRes> page(long current, long size, String keyword) {
         long safeCurrent = PageRes.clampCurrent(current);
@@ -116,7 +129,8 @@ public class UserServiceImpl implements UserService {
 
         List<UserAdminRes> records = page.getRecords().stream()
                 .map(user -> new UserAdminRes(
-                        user.getId(),
+                        // 雪花 id 出网必须走字符串, 理由见 UserAdminRes 的类注释。查到即有主键, 不用判空
+                        String.valueOf(user.getId()),
                         user.getUsername(),
                         user.getNickname(),
                         user.getLocked(),

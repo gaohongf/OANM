@@ -4,7 +4,12 @@ import { App as AntdApp, Alert, Drawer, Input, Space, Spin, Transfer } from 'ant
 import { request } from '../../../api/http'
 
 interface Permission {
-  id: number
+  /**
+   * 字符串而不是数字：后端以字符串出网（雪花 id 超过 `2^53 - 1` 就会被 JS 取整）。
+   * 这个字段在这里尤其要紧 —— 提交授权时它是 **请求体内容**，
+   * 一旦中途转成数字，授出去的就不是用户勾的那些权限了。
+   */
+  id: string
   permissionKey: string
   label: string
   builtIn: boolean
@@ -90,7 +95,7 @@ export function RolePermissionDrawer({ roleName, onClose, onSaved }: RolePermiss
         }
         setGranted(rolePermissions)
         setDefaultPool(firstPage.records)
-        setTargetKeys(rolePermissions.map((item) => String(item.id)))
+        setTargetKeys(rolePermissions.map((item) => item.id))
       } catch (error) {
         message.error(error instanceof Error ? error.message : '加载权限失败')
       } finally {
@@ -134,10 +139,14 @@ export function RolePermissionDrawer({ roleName, onClose, onSaved }: RolePermiss
     setSaving(true)
     try {
       // targetKeys 是**完整**的已授权集合（不是增量、也不是当前可见的那部分）
-      const permissionIds = targetKeys.map((key) => Number(key))
+      //
+      // 直接把 key 原样发出去, 不要 Number(key): 键就是后端给的字符串形式雪花 id,
+      // 转成数字会把低位丢掉（两个不同的权限会塌成同一个数）, 授权结果就错了 ——
+      // 而且它看起来完全正常, 直到发现被授权的不是自己勾的那几条。
+      // 后端收的是 List<Long>, Jackson 会把这种纯数字字符串精确解析回去, 不需要前端先转。
       await request<void>(`/api/auth/roles/${encodeURIComponent(roleName)}/permissions`, {
         method: 'PUT',
-        body: { permissionIds },
+        body: { permissionIds: targetKeys },
       })
       message.success('保存成功')
       onSaved()
@@ -239,7 +248,8 @@ function mergeById(current: Permission[], incoming: Permission[]): Permission[] 
 
 function toTransferItems(permissions: Permission[]): TransferItem[] {
   return permissions.map((item) => ({
-    key: String(item.id),
+    // id 本来就是字符串, 这里不再 String() 一次 —— 那会让人以为它可能是数字
+    key: item.id,
     title: item.label,
     description: item.permissionKey,
   }))

@@ -27,7 +27,7 @@ import type { MenuNode } from '../../types/api'
 const { Text } = Typography
 
 interface MenuForm {
-  parentId: number | null
+  parentId: string | null
   name: string
   path?: string
   component?: string
@@ -35,12 +35,13 @@ interface MenuForm {
   sort: number
   hidden: boolean
   keepAlive: boolean
-  permissionId: number | null
+  permissionId: string | null
   enabled: boolean
 }
 
 interface PermissionOption {
-  id: number
+  /** 字符串而不是数字：雪花 id 超过 2^53 在 JS 里会被取整 */
+  id: string
   permissionKey: string
   label: string
 }
@@ -108,7 +109,7 @@ export default function MenuList() {
     [permissions],
   )
 
-  const openCreate = (parentId: number | null) => {
+  const openCreate = (parentId: string | null) => {
     setEditing(null)
     setCreating(true)
     form.setFieldsValue({
@@ -161,7 +162,7 @@ export default function MenuList() {
     }
   }
 
-  const onDelete = async (id: number) => {
+  const onDelete = async (id: string) => {
     try {
       await request<void>(`/api/auth/menus/${id}`, { method: 'DELETE' })
       message.success('删除成功')

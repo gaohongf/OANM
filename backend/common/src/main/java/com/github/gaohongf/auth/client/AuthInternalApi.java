@@ -50,6 +50,20 @@ public final class AuthInternalApi {
     /** 上面路径的控制器前缀 */
     public static final String USERS = "/auth/internal/users";
 
+    /**
+     * 按角色名查用户 id 列表, 响应 data 为 id 列表。
+     * <p>
+     * <b>是相对于 {@link #USERS} 的中段, 不是完整路径</b> —— {@code UserClient} 的
+     * {@code @FeignClient(path = USERS)} 已经把前缀吃掉了, 那边只能写相对路径;
+     * 服务端的 {@code InternalUserController} 也是同样的 {@code @RequestMapping(USERS)}。
+     * 所以这个常量两边都能直接用, 这是它不带前缀的原因（写成完整路径会让 Feign 侧拼成
+     * {@code /auth/internal/users/auth/internal/users/...}）。
+     * <p>
+     * 用途是"通知某个角色的全部成员"：由生产方调它把角色展开成收件人列表。
+     * 收件人解析刻意放在生产方 —— 消息模块因此不需要在消费路径上依赖 service-auth 的可用性。
+     */
+    public static final String USERS_BY_ROLE = "/by-role/{roleName}";
+
     private AuthInternalApi() {
     }
 }

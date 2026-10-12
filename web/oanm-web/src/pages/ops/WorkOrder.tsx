@@ -14,7 +14,7 @@ import {
   Typography,
 } from 'antd'
 import { PlusOutlined, ReloadOutlined, SearchOutlined } from '@ant-design/icons'
-import { useNavigate } from 'react-router'
+import { useNavigate, useSearchParams } from 'react-router'
 
 import { AI_PERMISSIONS } from '../../api/ai'
 import {
@@ -65,6 +65,7 @@ export default function WorkOrderPage() {
   const [drawerOpen, setDrawerOpen] = useState(false)
   const [detail, setDetail] = useState<WorkOrderDetail | null>(null)
   const [detailLoading, setDetailLoading] = useState(false)
+  const [searchParams, setSearchParams] = useSearchParams()
 
   const load = useCallback(
     async ({ silent = false }: { silent?: boolean } = {}) => {
@@ -96,20 +97,49 @@ export default function WorkOrderPage() {
     void load({ silent: true })
   }, [load])
 
-  const openDetail = async (row: WorkOrderRow) => {
-    setDrawerOpen(true)
-    setDetail(null)
-    setDetailLoading(true)
-    try {
-      setDetail(await getWorkOrder(row.id))
-    } catch (error) {
-      message.error(error instanceof Error ? error.message : '加载详情失败')
-      // 拉不到就关掉抽屉，而不是留一个空的骨架在转
-      setDrawerOpen(false)
-    } finally {
-      setDetailLoading(false)
+  const openDetailById = useCallback(
+    async (id: string) => {
+      setDrawerOpen(true)
+      setDetail(null)
+      setDetailLoading(true)
+      try {
+        setDetail(await getWorkOrder(id))
+      } catch (error) {
+        message.error(error instanceof Error ? error.message : '加载详情失败')
+        // 拉不到就关掉抽屉，而不是留一个空的骨架在转
+        setDrawerOpen(false)
+      } finally {
+        setDetailLoading(false)
+      }
+    },
+    [message],
+  )
+
+  /**
+   * 支持从消息中心直接落到某一条工单：`?openId=<工单id>`。
+   *
+   * ## 为什么是查询参数而不是 `/ops/work-order/:id` 这样的详情路由
+   * 详情没有独立路由 —— 它是这一页里的一个抽屉（列表与详情是两个接口，见类注释）。
+   * 为了一条通知就去新增一条路由 + 一个新页面，等于把"打开抽屉"这件事做两遍。
+   *
+   * ## 参数用过就摘掉
+   * 留着它的话，用户关掉抽屉、再刷新页面，抽屉又会自己弹出来 —— 而"关掉"是有意的。
+   * 摘掉之后地址栏也随之干净，可以放心把链接发给别人。
+   */
+  useEffect(() => {
+    const openId = searchParams.get('openId')
+    if (!openId) {
+      return
     }
-  }
+    const next = new URLSearchParams(searchParams)
+    next.delete('openId')
+    setSearchParams(next, { replace: true })
+    // 这里的 setState 正是"用 effect 同步外部系统"那条规则允许的场景：抽屉该不该开
+    // 由地址栏决定，而不是由某次点击决定。三个 setState 在一次事件里被 React 合并成
+    // 一次渲染，所以它不会真的级联。
+    // eslint-disable-next-line react/set-state-in-effect
+    void openDetailById(openId)
+  }, [searchParams, setSearchParams, openDetailById])
 
   return (
     <Card
@@ -211,7 +241,7 @@ export default function WorkOrderPage() {
             fixed: 'right',
             render: (_, record) => (
               <Auth code={WORK_ORDER_PERMISSIONS.detail}>
-                <Button type="link" size="small" onClick={() => void openDetail(record)}>
+                <Button type="link" size="small" onClick={() => void openDetailById(record.id)}>
                   详情
                 </Button>
               </Auth>

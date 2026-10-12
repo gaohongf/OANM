@@ -32,19 +32,21 @@ export interface PageResult<T> {
  *
  * 它是**运行时才变形**的：库里只存 id，序列化时才换成用户对象。
  * 解析成功是 `{id, username}`，解析失败（用户服务不可用）降级成 `{id}` ——
- * 所以字段必须可选，而 `id` 也不该被当作可靠标识：用户 id 是雪花 id，
- * 而 common 的解析器把它输出成 JSON 数字，超过 2^53 就已经丢精度了。
- * 展示用户名没问题，拿它去查别的东西不行。
+ * 所以两个字段都必须可选。
+ *
+ * `id` 是字符串而不是数字：用户 id 是雪花 id（19 位），超过 `2^53 - 1` 之后
+ * JSON 数字在 JS 里会被取整成**另一个值**，所以后端一律以字符串出网。
+ * 这里保留这个类型而不是 `number` 正是为了不让人顺手把它转成数字。
  */
 export interface ResolvedUser {
-  id: number
+  id: string
   username?: string
   nickname?: string
 }
 
 /** 当前登录用户（后端 UserRes） */
 export interface CurrentUser {
-  id: number
+  id: string
   username: string
   nickname: string
   locked: boolean
@@ -52,8 +54,8 @@ export interface CurrentUser {
 
 /** 菜单节点（后端 MenuRes），树形 */
 export interface MenuNode {
-  id: number
-  parentId: number | null
+  id: string
+  parentId: string | null
   name: string
   /** 前端路由，如 /ops/work-order */
   path: string | null
@@ -67,7 +69,7 @@ export interface MenuNode {
   /** 在侧边栏隐藏（但仍可路由，用于详情页） */
   hidden: boolean
   keepAlive: boolean
-  permissionId: number | null
+  permissionId: string | null
   /** 所需权限的键；null 表示登录即可见 */
   permissionKey: string | null
   enabled: boolean

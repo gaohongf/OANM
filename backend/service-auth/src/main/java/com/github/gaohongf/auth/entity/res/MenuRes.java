@@ -15,14 +15,19 @@ import lombok.Data;
  * </ul>
  * 硬套 MapStruct 需要写 {@code @Mapping(ignore/expression)}, 比直接手写还难读。
  * 所以这个 DTO 由 {@code MenuServiceImpl} 手工组装。
+ *
+ * <h2>三个 id 为什么都是 String 而不是 Long</h2>
+ * 理由与 {@code WorkOrderRes} 上那段相同（雪花 id 超过 JS 的 {@code 2^53 - 1} 就无法精确表示）。
+ * 这里三个都要改, 漏一个就白改: 前端把这几个值原样放进"上级菜单"和"所需权限"两个选择框,
+ * 保存时又原样发回来 —— 只要其中一个在路上被取整, 保存出来的层级或门禁就是错的。</p>
  */
 @Data
 public class MenuRes {
 
-    private Long id;
+    private String id;
 
     /** 父节点; {@code null} 表示顶级 */
-    private Long parentId;
+    private String parentId;
 
     private String name;
 
@@ -42,7 +47,7 @@ public class MenuRes {
     private Boolean keepAlive;
 
     /** 所需权限的 id; {@code null} 表示登录即可见 */
-    private Long permissionId;
+    private String permissionId;
 
     /**
      * 所需权限的键, 由 join {@code permissions} 得来。
