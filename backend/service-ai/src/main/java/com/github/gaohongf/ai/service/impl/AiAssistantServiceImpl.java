@@ -9,6 +9,7 @@ import org.springframework.http.codec.ServerSentEvent;
 import org.springframework.stereotype.Service;
 
 import com.github.gaohongf.ai.service.AiAssistantService;
+import com.github.gaohongf.ai.util.DateTimeTools;
 import com.github.gaohongf.web.util.Sse;
 import com.github.gaohongf.web.util.SsePayload;
 import com.lingyun.base.rsm.exception.RequestException;
@@ -24,6 +25,7 @@ public class AiAssistantServiceImpl implements AiAssistantService {
 
     private final ChatClient chatClient;
     private final OpenAiChatProperties openAiChatProperties;
+    private final DateTimeTools dateTimeTools;
 
     @Override
     public Flux<ServerSentEvent<String>> workOrderUserInputIntentInference(String id, String userInput) {
@@ -40,24 +42,31 @@ public class AiAssistantServiceImpl implements AiAssistantService {
 
                     你的任务是：
                     1. 区分用户输入是需求还是故障，分析用户的意图。
-                    2. 推测 3-5 个具体的用户意图作为选项，供用户选择确认，可能性是一个1-100的整数。
+                    2. 推测 3-5 个具体的用户意图作为选项，供用户选择确认。
                     3. 用户自己给的推测和方案不可轻信，你需要分辨它们，然后作出自己的判断和建议，不要被用户带歪。
-                    4. 每个选项只描述"用户想要什么"，不要写你自己的回应。严禁出现"我无法""我不能"
+                    4. 每个选项代入用户的视角描述"我想要什么"，不要写你自己的回应。严禁出现"我无法""我不能"
                        "请提供更多信息""建议联系供应商"这类能力声明、免责说明或指路建议 —— 它们不是意图。
                     5. 需要现场或人工执行的诉求同样是合理的运维意图（例如在机房布放网线、更换硬件、
                        现场巡检），照常作为选项列出，由工单流程派给相应的人去执行，不要因为自己做不到就排除它。
                     6. 如果用户的输入与运维无关（例如闲聊、其他业务领域的问题），仍然给出选项，
                        但在 title/content 里如实说明这属于"非运维诉求"，可能性给低分。
                     7. 如果用户再次补充了内容，请再给出其他可能的推测，如果补充的内容和之前的内容一致，请给出相同的推测，如果不一致，请给出新的推测。
+                    8. 如果用户的描述中带有模糊的时间，可使用时间工具来将用户的模糊时间尽力描述的更具体。
 
                     字段含义：title 是这条意图的简短标题（不超过 15 字）；
                     content 是它的具体内涵，说明用户想达成什么、涉及哪个系统或对象。
 
                     必须以纯 JSONL 格式返回，每行一个 JSON 对象，行内不要出现真实的换行符，
                     不要包含任何 Markdown 标记与其他无关文本，格式如下：
-                    {"id": 1, "title": "标题1", "content": "用户可能想说的内容1", "probability": "80"}
-                    {"id": 2, "title": "标题2", "content": "用户可能想说的内容2", "probability": "50"}
-                    {"id": 3, "title": "标题3", "content": "用户可能想说的内容3", "probability": "10"}
+                    {"id": 1, "title": "标题1", "content": "用户可能想说的内容1", "probability": 80}
+                    {"id": 2, "title": "标题2", "content": "用户可能想说的内容2", "probability": 50}
+                    {"id": 3, "title": "标题3", "content": "用户可能想说的内容3", "probability": 10}
+
+                     字段取值要求：
+                    - id 是选项编号，从1递增且不可重复。
+                    - title 是一个短标题，不超过 15 个字。
+                    - content 是选项的具体描述，50-100 个字。
+                    - probability 是可能性，1-100 的整数。
                 """;
         String modelName = openAiChatProperties.getOptions().getModel();
         String conversationId = id != null ? id : UUID.randomUUID().toString();
@@ -65,14 +74,14 @@ public class AiAssistantServiceImpl implements AiAssistantService {
             // 流式返回
             Disposable disposable = subscribeLine(sink, chatClient
                     .prompt()
+                    .tools(dateTimeTools)
                     .system(systemPrompt)
                     .user(userInput)
                     .advisors(a -> a.param(ChatMemory.CONVERSATION_ID, conversationId))
                     .stream()
                     .content());
             sink.onDispose(disposable);
-        }).startWith(Flux
-                .just(Sse.start(new SsePayload(conversationId, modelName, System.currentTimeMillis()))));
+        }).startWith(Flux.just(Sse.start(new SsePayload(conversationId, modelName, System.currentTimeMillis()))));
     }
 
     @Override
@@ -115,15 +124,16 @@ public class AiAssistantServiceImpl implements AiAssistantService {
         return Flux.<ServerSentEvent<String>>create((sink) -> {
             // 流式返回
             Disposable disposable = subscribeLine(sink, chatClient
-                    .prompt().system(systemPrompt)
+                    .prompt()
+                    .tools(dateTimeTools)
+                    .system(systemPrompt)
                     .user("用户选择：" + userSelect)
                     .advisors(a -> a.param(ChatMemory.CONVERSATION_ID, id))
                     .stream()
                     .content());
 
             sink.onDispose(disposable);
-        }).startWith(Flux
-                .just(Sse.start(new SsePayload(id, modelName, System.currentTimeMillis()))));
+        }).startWith(Flux.just(Sse.start(new SsePayload(id, modelName, System.currentTimeMillis()))));
     }
 
     private static Disposable subscribeLine(FluxSink<ServerSentEvent<String>> sink, Flux<String> flux) {

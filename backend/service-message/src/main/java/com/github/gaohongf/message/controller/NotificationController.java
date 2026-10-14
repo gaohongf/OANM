@@ -114,7 +114,6 @@ public class NotificationController {
     /**
      * 消息推送流。
      *
-     * <h2>形状与 AI 的两个流式端点一致</h2>
      * 首帧 {@code start} + 业务事件 + 定期心跳, 全部由 {@link Sse} 构造
      * （那个类里有一条关于"data 前导空格"的坑, 复用它是为了让规则只有一处）。
      *
