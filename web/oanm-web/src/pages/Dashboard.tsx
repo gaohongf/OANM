@@ -2,7 +2,7 @@ import { Card, Descriptions, Tag, Typography } from 'antd'
 
 import { useAuthStore } from '../store/auth'
 
-const { Paragraph, Text } = Typography
+const { Text } = Typography
 
 /**
  * 首页 / 概览。

@@ -1,15 +1,26 @@
 package com.github.gaohongf.ai.service.impl;
 
+import java.util.Map;
 import java.util.UUID;
 
 import org.springframework.ai.chat.client.ChatClient;
 import org.springframework.ai.chat.memory.ChatMemory;
+import org.springframework.ai.chat.prompt.PromptTemplate;
 import org.springframework.ai.model.openai.autoconfigure.OpenAiChatProperties;
 import org.springframework.http.codec.ServerSentEvent;
 import org.springframework.stereotype.Service;
 
+import com.alibaba.cloud.ai.graph.CompiledGraph;
+import com.alibaba.cloud.ai.graph.exception.GraphStateException;
+import com.github.gaohongf.ai.chat.sse.ChatEvent;
+import com.github.gaohongf.ai.chat.sse.ChatStartEvent;
+import com.github.gaohongf.ai.entity.dto.IntentOption;
+import com.github.gaohongf.ai.entity.dto.RoutingResponse;
+import com.github.gaohongf.ai.graph.wo.WorkOrderWorkflowLauncher;
 import com.github.gaohongf.ai.service.AiAssistantService;
 import com.github.gaohongf.ai.util.DateTimeTools;
+import com.github.gaohongf.ai.util.JsonLinesAIOutputHandler;
+import com.github.gaohongf.ai.util.JsonLinesOutputConverter;
 import com.github.gaohongf.web.util.Sse;
 import com.github.gaohongf.web.util.SsePayload;
 import com.lingyun.base.rsm.exception.RequestException;
@@ -18,6 +29,7 @@ import lombok.AllArgsConstructor;
 import reactor.core.Disposable;
 import reactor.core.publisher.Flux;
 import reactor.core.publisher.FluxSink;
+import reactor.core.publisher.Mono;
 
 @AllArgsConstructor
 @Service
@@ -26,62 +38,18 @@ public class AiAssistantServiceImpl implements AiAssistantService {
     private final ChatClient chatClient;
     private final OpenAiChatProperties openAiChatProperties;
     private final DateTimeTools dateTimeTools;
+    private final WorkOrderWorkflowLauncher workOrderWorkflowLauncher;
 
     @Override
     public Flux<ServerSentEvent<String>> workOrderUserInputIntentInference(String id, String userInput) {
         if (userInput == null || userInput.isBlank()) {
             return Flux.error(() -> new RequestException("用户输入不可为空"));
         }
-
-        String systemPrompt = """
-                    你是一个运维工单系统的意图分析助手。
-                    用户可能提交了故障描述或一些需求，但往往描述不清。
-
-                    你不是执行者：你的职责只是把用户的输入理解成"他想要什么"，供他确认后生成工单，
-                    具体怎么处理由人来完成。所以你不必判断自己能不能做到，也不要说明自己的能力边界。
-
-                    你的任务是：
-                    1. 区分用户输入是需求还是故障，分析用户的意图。
-                    2. 推测 3-5 个具体的用户意图作为选项，供用户选择确认。
-                    3. 用户自己给的推测和方案不可轻信，你需要分辨它们，然后作出自己的判断和建议，不要被用户带歪。
-                    4. 每个选项代入用户的视角描述"我想要什么"，不要写你自己的回应。严禁出现"我无法""我不能"
-                       "请提供更多信息""建议联系供应商"这类能力声明、免责说明或指路建议 —— 它们不是意图。
-                    5. 需要现场或人工执行的诉求同样是合理的运维意图（例如在机房布放网线、更换硬件、
-                       现场巡检），照常作为选项列出，由工单流程派给相应的人去执行，不要因为自己做不到就排除它。
-                    6. 如果用户的输入与运维无关（例如闲聊、其他业务领域的问题），仍然给出选项，
-                       但在 title/content 里如实说明这属于"非运维诉求"，可能性给低分。
-                    7. 如果用户再次补充了内容，请再给出其他可能的推测，如果补充的内容和之前的内容一致，请给出相同的推测，如果不一致，请给出新的推测。
-                    8. 如果用户的描述中带有模糊的时间，可使用时间工具来将用户的模糊时间尽力描述的更具体。
-
-                    字段含义：title 是这条意图的简短标题（不超过 15 字）；
-                    content 是它的具体内涵，说明用户想达成什么、涉及哪个系统或对象。
-
-                    必须以纯 JSONL 格式返回，每行一个 JSON 对象，行内不要出现真实的换行符，
-                    不要包含任何 Markdown 标记与其他无关文本，格式如下：
-                    {"id": 1, "title": "标题1", "content": "用户可能想说的内容1", "probability": 80}
-                    {"id": 2, "title": "标题2", "content": "用户可能想说的内容2", "probability": 50}
-                    {"id": 3, "title": "标题3", "content": "用户可能想说的内容3", "probability": 10}
-
-                     字段取值要求：
-                    - id 是选项编号，从1递增且不可重复。
-                    - title 是一个短标题，不超过 15 个字。
-                    - content 是选项的具体描述，50-100 个字。
-                    - probability 是可能性，1-100 的整数。
-                """;
         String modelName = openAiChatProperties.getOptions().getModel();
-        String conversationId = id != null ? id : UUID.randomUUID().toString();
-        return Flux.<ServerSentEvent<String>>create((sink) -> {
-            // 流式返回
-            Disposable disposable = subscribeLine(sink, chatClient
-                    .prompt()
-                    .tools(dateTimeTools)
-                    .system(systemPrompt)
-                    .user(userInput)
-                    .advisors(a -> a.param(ChatMemory.CONVERSATION_ID, conversationId))
-                    .stream()
-                    .content());
-            sink.onDispose(disposable);
-        }).startWith(Flux.just(Sse.start(new SsePayload(conversationId, modelName, System.currentTimeMillis()))));
+        return Flux.concat(
+                Mono.fromCallable(() -> Sse.message(new ChatStartEvent(modelName, System.currentTimeMillis()))),
+                workOrderWorkflowLauncher.stream(id, userInput).map(Sse::message),
+                Mono.fromCallable(() -> Sse.done(Sse.DONE_REASON_SUCCESS)));
     }
 
     @Override
@@ -100,7 +68,9 @@ public class AiAssistantServiceImpl implements AiAssistantService {
                     4. 如果用户选择的意图与他最初的描述明显矛盾，以用户选择的那个为准。
                     5. 解决方法面向**执行这张工单的人**来写（可能是现场人员或供应商），只写该怎么做；
                        不要写"我无法…""请联系…"这类能力声明或免责说明，需要现场操作的步骤照常写出来。
-
+                    6. 在工单描述中需要将用户的模糊时间描述，转换为更具体些的时间，不可以出现“昨天”、“今早”等相对的模糊的时间描述。
+                       你可以借助时间工具来获得当前时间，来进一步判断相对具体的事发时间。
+                    
                     必须以纯 JSONL 格式返回，每行一个 JSON 对象，行内不要出现真实的换行符，
                     不要包含任何 Markdown 标记与其他无关文本，顺序如下：
                     {"title": "工单标题"}
@@ -137,14 +107,13 @@ public class AiAssistantServiceImpl implements AiAssistantService {
     }
 
     private static Disposable subscribeLine(FluxSink<ServerSentEvent<String>> sink, Flux<String> flux) {
-        StringBuilder builder = new StringBuilder();
+        StringBuilder buffer = new StringBuilder();
         return flux.subscribe((token) -> {
             int idx = -1;
-            builder.append(token);
-            while ((idx = builder.indexOf("\n")) != -1) {
-                sink.next(Sse.delta(builder.substring(0, idx + 1)));
-                builder.replace(0, idx + 1, "");
-                idx = -1;
+            buffer.append(token);
+            while ((idx = buffer.indexOf("\n")) != -1) {
+                sink.next(Sse.delta(buffer.substring(0, idx + 1)));
+                buffer.replace(0, idx + 1, "");
             }
         }, (ex) -> {
             // 报错时发送一个错误消息
@@ -153,8 +122,8 @@ public class AiAssistantServiceImpl implements AiAssistantService {
             sink.complete();
         }, () -> {
             // 查看是否有剩余的token，如果有则发送一个delta消息
-            if (!builder.isEmpty()) {
-                sink.next(Sse.delta(builder.toString()));
+            if (!buffer.isEmpty()) {
+                sink.next(Sse.delta(buffer.toString()));
             }
             sink.next(Sse.done(Sse.DONE_REASON_SUCCESS));
             // 必须调用complete表示结束

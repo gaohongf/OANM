@@ -38,10 +38,50 @@ body {
   }
 }
 
+/*
+  聊天里"正在输入"的三个点。
+  颜色走 currentColor，由使用处的 antd token 决定，这里不写死颜色。
+*/
+.chat-typing {
+  display: inline-flex;
+  gap: 3px;
+  align-items: center;
+}
+
+.chat-typing i {
+  width: 4px;
+  height: 4px;
+  border-radius: 50%;
+  background: currentColor;
+  animation: chat-typing 1.2s ease-in-out infinite;
+}
+
+.chat-typing i:nth-child(2) {
+  animation-delay: 0.2s;
+}
+
+.chat-typing i:nth-child(3) {
+  animation-delay: 0.4s;
+}
+
+@keyframes chat-typing {
+  0%,
+  60%,
+  100% {
+    opacity: 0.3;
+    transform: translateY(0);
+  }
+  30% {
+    opacity: 1;
+    transform: translateY(-2px);
+  }
+}
+
 /* 尊重系统的"减少动态效果"设置。开了这个的用户通常是因为动效会引起不适，
    而不是审美偏好，所以这里直接关掉而不是缩短。 */
 @media (prefers-reduced-motion: reduce) {
-  .page-transition {
+  .page-transition,
+  .chat-typing i {
     animation: none;
   }
 }

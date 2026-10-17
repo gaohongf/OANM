@@ -24,7 +24,7 @@ import type { SubmitWorkOrderPayload, WorkOrderPriority, WorkOrderType } from '.
 import { Auth } from '../../permission/Auth'
 import { RawOutputPanel } from './components/RawOutputPanel'
 
-const { Text, Paragraph } = Typography
+const { Text } = Typography
 const { TextArea } = Input
 
 // Select 只认 {value,label}，我们自己那份元数据还带着颜色，这里摘一下

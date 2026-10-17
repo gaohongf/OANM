@@ -23,6 +23,14 @@ export const AI_PERMISSIONS = {
 
 // ---- 意图推断 ----
 
+/**
+ * 本轮由哪个节点作答。**直接是后端工作流里的节点名**，前端不另起一套叫法：
+ *
+ * - `ask`：缺时间/地点，这一轮只反问一句（`d` 是 token 片段）
+ * - `options`：信息齐了，这一轮给选项（`d` 是一个选项对象）
+ */
+export type IntentNode = 'ask' | 'options'
+
 export interface IntentOption {
   id: number
   title: string
@@ -38,12 +46,22 @@ export interface IntentOption {
  */
 export function parseIntentOption(line: string): IntentOption | null {
   const parsed = parseJsonLine(line)
-  if (!parsed) {
+  return parsed ? readOption(parsed) : null
+}
+
+/**
+ * 从一段已经解析好的数据里读出一个选项。
+ *
+ * 字段值可能是模型编的（`"80%"`、`title` 给数字），所以一律过一遍归一化；
+ * 缺 id 或 title 就不算一个选项 —— 那样的卡片既没法选也没法提交。
+ */
+function readOption(value: unknown): IntentOption | null {
+  if (typeof value !== 'object' || value === null) {
     return null
   }
+  const parsed = value as Record<string, unknown>
   const id = toNumber(parsed.id)
   const title = toText(parsed.title)
-  // id 和 title 是这个选项的身份，缺了就没法渲染成一张能选的卡片
   if (id === null || title === null) {
     return null
   }
@@ -53,6 +71,16 @@ export function parseIntentOption(line: string): IntentOption | null {
     content: toText(parsed.content) ?? '',
     probability: toProbability(parsed.probability),
   }
+}
+
+/**
+ * `chat` 帧里 `options` 节点的数据。
+ *
+ * 正常情况下后端给的是**已经解析好的对象**（`OptionsNode` 交出去的就是选项流）；
+ * 万一以后改成逐字下发 JSON 文本，这里按 JSONL 行再兜一次，不必等前端报错才发现。
+ */
+function parseOptionData(data: unknown): IntentOption | null {
+  return typeof data === 'string' ? parseIntentOption(data) : readOption(data)
 }
 
 // ---- 辅助填单 ----
@@ -134,22 +162,46 @@ export function parseAssistLine(line: string): AssistLine | null {
 // ---- 流式调用 ----
 
 export interface IntentStreamOptions {
-  /** 首轮不传；用户补充时传上一轮 `start` 事件给的那个 id */
+  /** 首轮不传；用户补充时传上一轮 `workflow` 事件给的 threadId */
   conversationId?: string | null
   userInput: string
   signal?: AbortSignal
-  /** 拿到会话 id（首轮即由它产生）。后续每一轮和提交工单都要带上 */
-  onStart?: (conversationId: string) => void
+  /**
+   * 本轮工作流的 threadId，首轮由后端生成。
+   * 它就是要带回去的会话标识：下一轮、以及提交工单都得用它。
+   */
+  onWorkflow?: (threadId: string) => void
+  /**
+   * 本轮作答所用的模型名，来自 `start` 事件。页面把它标在气泡上，
+   * 以后换成人工坐席时同一位置显示坐席标识。
+   */
+  onModel?: (modelName: string) => void
+  /**
+   * 本轮的作答形态，在第一个 `chat` 帧回来时触发一次。同一轮里不会变。
+   * **没触发**说明这一轮什么都没产出（中断、空流），调用方按"选项"那套走即可。
+   */
+  onMode?: (node: IntentNode) => void
+  /**
+   * `ask` 路的追问。**每次给的都是拼到当前为止的整段文字**，不是 token 增量 ——
+   * 拼接收在这一层，调用方直接 setState 即可。
+   */
+  onQuestion?: (text: string) => void
   /** 每解析出一个选项就回调一次 —— 卡片就是这样一条条出现的 */
   onOption: (option: IntentOption) => void
-  /** 原始行，一行不漏。给"原始输出"面板用，模型不守格式时得能看见它到底发了什么 */
-  onRawLine?: (line: string) => void
   onDone?: () => void
   /** 失败一律走这里，Promise 不会 reject */
   onError: (message: string) => void
 }
 
 export function startIntentInference(options: IntentStreamOptions): Promise<void> {
+  /**
+   * 本轮由哪个节点作答。null = 还没收到 `chat` 帧。
+   * 没等到就一路按选项处理：空流或中断时页面至少是"这轮没给选项"，不会卡在未知状态。
+   */
+  let node: IntentNode | null = null
+  /** `ask` 路的累积文本。攒够了整段再往外给，页面不用自己拼 token */
+  let question = ''
+
   return openSse(INTENT_INFERENCE_PATH, {
     query: {
       // 首轮必须不带 id（后端会生成一个），而不是传空串 —— 空串会被当成一个真的会话 id
@@ -157,10 +209,30 @@ export function startIntentInference(options: IntentStreamOptions): Promise<void
       userInput: options.userInput,
     },
     signal: options.signal,
-    onStart: (payload) => options.onStart?.(payload.id),
-    onDelta: (line) => {
-      options.onRawLine?.(line)
-      const option = parseIntentOption(line)
+    // 两个字段名是历史差异（意图推断发 modelName，辅助填单发 model），取先有的那个
+    onStart: (payload) => {
+      const modelName = payload.modelName ?? payload.model
+      if (modelName !== undefined && modelName !== '') {
+        options.onModel?.(modelName)
+      }
+    },
+    onWorkflow: (threadId) => options.onWorkflow?.(threadId),
+    onChat: (frame) => {
+      // 不认识节点名就安静跳过：以后工作流加节点，老前端应当少显示而不是报错
+      if (frame.n !== 'ask' && frame.n !== 'options') {
+        return
+      }
+      if (node === null) {
+        node = frame.n
+        options.onMode?.(frame.n)
+      }
+      if (frame.n === 'ask') {
+        // 追问是纯文本 token，一个挨一个地拼 —— 它不是 JSON，别往 parseJsonLine 里送
+        question += toText(frame.d) ?? ''
+        options.onQuestion?.(question)
+        return
+      }
+      const option = parseOptionData(frame.d)
       if (option) {
         options.onOption(option)
       }

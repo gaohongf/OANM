@@ -43,4 +43,7 @@ spring:
     #         readTimeout: 800
 
 
-    
+logging:
+  level:
+    # 控制整个 graph 包的日志级别
+    com.alibaba.cloud.ai.graph: WARN

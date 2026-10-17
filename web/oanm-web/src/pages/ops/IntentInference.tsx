@@ -1,43 +1,47 @@
-import { useCallback, useEffect, useRef, useState } from 'react'
-import {
-  Alert,
-  App as AntdApp,
-  Button,
-  Card,
-  Collapse,
-  Divider,
-  Empty,
-  Space,
-  Spin,
-  Typography,
-  Input,
-} from 'antd'
-import { ReloadOutlined, SendOutlined, ThunderboltOutlined } from '@ant-design/icons'
+import { Fragment, useCallback, useEffect, useRef, useState } from 'react'
+import { App as AntdApp, Avatar, Button, Card, Flex, Input, Space, Typography, theme } from 'antd'
+import { FileAddOutlined, ReloadOutlined, RobotOutlined, SendOutlined } from '@ant-design/icons'
 import { useNavigate } from 'react-router'
 
 import { AI_PERMISSIONS, startIntentInference } from '../../api/ai'
-import type { IntentOption } from '../../api/ai'
+import type { IntentNode } from '../../api/ai'
 import { clearDraft, emptyDraft, loadDraft, saveDraft } from '../../api/aiSession'
-import type { IntentDraft } from '../../api/aiSession'
+import type { IntentDraft, IntentRound } from '../../api/aiSession'
 import { Auth } from '../../permission/Auth'
-import { IntentOptionCard } from './components/IntentOptionCard'
-import { RawOutputPanel } from './components/RawOutputPanel'
+import { ChatBubble } from './components/ChatBubble'
+import type { BubbleContent } from './components/ChatBubble'
 
 const { Text, Paragraph } = Typography
 const { TextArea } = Input
 
 /**
+ * 空白页上那块固定引导牌的文案（纯前端，不经过后端）。
+ * 想调整"该怎么说"的建议时只改这里。
+ */
+const GUIDE_TIPS = [
+  { label: '时间', hint: '什么时候开始的、持续了多久，比如「昨天上午十点」' },
+  { label: '地点', hint: '哪台设备、哪个系统或哪间办公室，比如「行政楼三楼」「财务系统」' },
+  { label: '现象', hint: '你看到了什么、做到哪一步出的错，比如「导出报表一直转圈」' },
+]
+
+/**
  * 智能提单第一步：意图推断。
  *
  * ## 交互形状
- * 用户先说一段问题描述 → AI 流式吐出一串候选意图，**每解析出一条就渲染一张卡片**
- * （不是等它全部说完再一起显示）→ 用户选中最像的那张，或者继续补充说明。
+ * 一整段对话：用户说的话靠右，AI 的作答靠左。AI 这一轮可能给一组候选意图卡片，
+ * 也可能（缺时间、地点这类关键信息时）反过来问一句 —— 两种形态都是"这一轮它说了什么"，
+ * 所以都落在同一条气泡里，只是气泡类型不同（见 `ChatBubble` 的 `BubbleContent`）。
  *
- * ## 补充之后为什么是"替换"而不是"追加"
- * 每一轮补充都是一次**新的推断**，旧的那组选项是针对旧描述的，放在一起只会让人
- * 分不清哪张是哪一轮的。所以新一轮开始时当前卡片区立刻清空（后端每轮也会重新给一组
- * 新的 id）。但历史并没有丢：每一轮的输入和它的选项都收在上面的「历史轮次」里可回看 ——
- * 用了两轮才说清问题的人，回头还能确认自己第一轮说了什么。
+ * 后端是一个工作流（判定 → 追问 / 选项），每条 `chat` 帧带着产出它的节点名
+ * （见 `api/ai.ts` 的 `IntentNode`），第一个 `chat` 帧就说明了本轮是哪种。
+ *
+ * ## 为什么只保留一个输入框
+ * "第一句描述"和"后续补充"对用户是同一件事，没必要换一个框、换一套按钮文案。
+ * 只有 placeholder 和按钮文字会随上下文变（开始分析 / 继续分析 / 提交回答）。
+ *
+ * ## 为什么只有最新一轮的选项能点
+ * 选项编号每轮都从 1 开始，而提交时只带编号。让用户选第二轮的 #2、却去提交第一轮的 #2，
+ * 后端分不清指的是哪一条。历史轮次的卡片保留下来但只读，并标一句"仅供回看"。
  *
  * ## 状态的持久化
  * 草稿（每轮的输入 + 选项 + 选中的那张）落在 sessionStorage 里，见 `api/aiSession.ts`。
@@ -46,6 +50,7 @@ const { TextArea } = Input
  */
 export default function IntentInference() {
   const { message } = AntdApp.useApp()
+  const { token } = theme.useToken()
   const navigate = useNavigate()
 
   // sessionStorage 是同步的，所以直接当 useState 的初始值 ——
@@ -56,8 +61,10 @@ export default function IntentInference() {
   const [streaming, setStreaming] = useState(false)
   const [noOption, setNoOption] = useState(false)
   const [error, setError] = useState<string | null>(null)
-  const [rawLines, setRawLines] = useState<string[]>([])
   const abortRef = useRef<AbortController | null>(null)
+  const scrollRef = useRef<HTMLDivElement | null>(null)
+  /** 上一帧的轮次数，用来判断"是不是用户刚发了新消息"（见下面的滚动 effect） */
+  const lastRoundCount = useRef(0)
 
   // 每次变化都落盘：中途刷新页面时，前面几轮和会话 id 都还在
   useEffect(() => {
@@ -70,6 +77,43 @@ export default function IntentInference() {
     return () => abortRef.current?.abort()
   }, [])
 
+  /**
+   * 跟着最新内容滚到底。
+   *
+   * 两种情况下必须滚：用户自己刚发了一条；以及流还在往最后那条里加字。
+   * 但用户往上翻历史的时候不要把他拽回来 —— 所以只有"本来就贴着底部"才跟随。
+   */
+  useEffect(() => {
+    const el = scrollRef.current
+    if (el === null) {
+      return
+    }
+    const grew = draft.rounds.length !== lastRoundCount.current
+    lastRoundCount.current = draft.rounds.length
+    if (!grew && el.scrollHeight - el.scrollTop - el.clientHeight > 160) {
+      return
+    }
+    el.scrollTop = el.scrollHeight
+  }, [draft.rounds, streaming, error, noOption])
+
+  /**
+   * 改写**当前（最后一个）**轮次。流里的每个事件都落到它上面，所以收成一个函数。
+   *
+   * 用 `prev.rounds.length - 1` 而不是闭包里算好的下标：闭包里那个读的是发起时的
+   * draft（已经过期了），"最后一个"则天然指向本轮。
+   */
+  const patchActiveRound = useCallback((patch: (round: IntentRound) => IntentRound) => {
+    setDraft((prev) => {
+      const last = prev.rounds.length - 1
+      if (last < 0) {
+        return prev
+      }
+      const rounds = [...prev.rounds]
+      rounds[last] = patch(rounds[last])
+      return { ...prev, rounds }
+    })
+  }, [])
+
   const run = useCallback(
     async (text: string) => {
       const controller = new AbortController()
@@ -79,60 +123,71 @@ export default function IntentInference() {
       setStreaming(true)
       setError(null)
       setNoOption(false)
-      setRawLines([])
-      // 先放一个空的占位轮次：选项会一条条填进来，而上一轮的卡片就此从"当前"变成"历史"
-      setDraft((prev) => ({ ...prev, rounds: [...prev.rounds, { input: text, options: [] }] }))
+      // 先放一个占位轮次：选项会一条条填进来，而上一轮的卡片就此只读。
+      // mode 先记 PENDING —— 此刻还不知道这轮会拿回选项还是追问
+      setDraft((prev) => ({
+        ...prev,
+        // 新一轮意味着新的一组选项，上一轮选中的那条已经过期了
+        selected: null,
+        rounds: [
+          ...prev.rounds,
+          { input: text, mode: 'PENDING', model: '', question: '', options: [] },
+        ],
+      }))
 
       let received = 0
+      /**
+       * 本轮由哪个节点作答。**在闭包外面**记一份，因为下面 finally 里要拿它判断
+       * "没解析出选项"到底是不是个错误 —— 那时 draft 已经不容易读了。
+       */
+      let mode: IntentNode | null = null
       try {
         await startIntentInference({
           conversationId,
           userInput: text,
           signal: controller.signal,
-          // 首轮的会话 id 是后端生成的，就在这个事件里
-          onStart: (id) => setDraft((prev) => ({ ...prev, conversationId: id })),
-          onRawLine: (line) => setRawLines((prev) => [...prev, line]),
+          // 首轮的 threadId 是后端生成的，就在这个事件里 ——
+          // 它同时是下一轮和提交工单要带的会话标识
+          onWorkflow: (threadId) => setDraft((prev) => ({ ...prev, conversationId: threadId })),
+          // 模型名贴在气泡名字旁边；以后人工介入时这里记的是坐席
+          onModel: (modelName) => patchActiveRound((round) => ({ ...round, model: modelName })),
+          onMode: (node) => {
+            mode = node
+            patchActiveRound((round) => ({ ...round, mode: node }))
+          },
+          // 收到的每次都是完整一段（不是增量），直接覆盖
+          onQuestion: (question) => patchActiveRound((round) => ({ ...round, question })),
           onOption: (option) => {
             received += 1
-            // 永远写到**最后一个**轮次上：用闭包里算好的下标会读到过期的 draft，
-            // "最后一个"则天然是对的
-            setDraft((prev) => {
-              const last = prev.rounds.length - 1
-              if (last < 0) {
-                return prev
-              }
-              const rounds = [...prev.rounds]
-              rounds[last] = { ...rounds[last], options: [...rounds[last].options, option] }
-              return { ...prev, rounds }
-            })
+            patchActiveRound((round) => ({ ...round, options: [...round.options, option] }))
           },
           onError: (msg) => setError(msg),
         })
       } finally {
         setStreaming(false)
         abortRef.current = null
-        // 中途自己中断的不算"没解析出选项"，别把它报成解析失败
-        setNoOption(!controller.signal.aborted && received === 0)
+        // 中途自己中断的不算"没解析出选项"，别把它报成解析失败；
+        // 追问那一轮本来就没有也不该有选项，一条都没解析出来是**正确**结果，更不能报格式错误
+        setNoOption(!controller.signal.aborted && received === 0 && mode !== 'ask')
       }
     },
-    [draft.conversationId],
+    [draft.conversationId, patchActiveRound],
   )
 
-  const onAnalyse = () => {
-    const text = input.trim()
+  /** 第一句描述和后续补充共用同一个输入框，只是数据源和按钮文案不同 */
+  const isFirst = draft.rounds.length === 0
+  const composerValue = isFirst ? input : supplement
+  const setComposerValue = isFirst ? setInput : setSupplement
+  const onSend = () => {
+    const text = composerValue.trim()
     if (text === '' || streaming) {
       return
     }
-    setInput('')
-    void run(text)
-  }
-
-  const onSupplement = () => {
-    const text = supplement.trim()
-    if (text === '' || streaming) {
-      return
+    if (isFirst) {
+      setInput('')
+    } else {
+      setSupplement('')
     }
-    setSupplement('')
     void run(text)
   }
 
@@ -145,33 +200,89 @@ export default function IntentInference() {
     abortRef.current?.abort()
     clearDraft()
     setDraft(emptyDraft())
-    setRawLines([])
     setError(null)
     setNoOption(false)
   }
 
+  const activeIndex = draft.rounds.length - 1
+  const activeRound = activeIndex >= 0 ? draft.rounds[activeIndex] : null
+  /** 当前这一轮 AI 在**追问**，而不是给选项。输入框的语义与文案都要跟着走 */
+  const asking = activeRound?.mode === 'ask'
+  const selectedHere =
+    draft.selected !== null && draft.selected.roundIndex === activeIndex
+      ? draft.selected.option
+      : null
+
   const onCreateWorkOrder = () => {
-    const selected = draft.selected
-    if (!selected || draft.conversationId === null) {
+    if (selectedHere === null || draft.conversationId === null) {
       return
     }
     // 会话 id 与分析结果都留在草稿里，下一步据此预填表单
     navigate(
-      `/ops/ai/submit?conversationId=${encodeURIComponent(draft.conversationId)}&option=${selected.option.id}`,
+      `/ops/ai/submit?conversationId=${encodeURIComponent(draft.conversationId)}&option=${selectedHere.id}`,
     )
   }
 
-  const activeIndex = draft.rounds.length - 1
-  const activeRound = activeIndex >= 0 ? draft.rounds[activeIndex] : null
-  const historyRounds = draft.rounds.slice(0, Math.max(activeIndex, 0))
-  const selected = draft.selected
-  const selectedHere =
-    selected !== null && selected.roundIndex === activeIndex ? selected.option.id : null
+  /**
+   * 一轮 AI 作答该渲染成哪种气泡。
+   * 返回 null 表示这一轮没有可显示的内容（比如流在产出任何东西之前就被中断了）。
+   */
+  const aiBubble = (round: IntentRound, index: number): BubbleContent | null => {
+    const isActive = index === activeIndex
+
+    if (round.mode === 'PENDING') {
+      // 节点还没定：这时候说"没给出选项"是错的，它还不知道自己要给什么
+      return streaming && isActive ? { kind: 'pending', text: '正在分析…' } : null
+    }
+
+    if (round.mode === 'ask') {
+      if (round.question !== '') {
+        return { kind: 'text', text: round.question }
+      }
+      // 节点定了但第一个字还没到
+      return streaming && isActive
+        ? { kind: 'pending', text: '正在组织问题…' }
+        : { kind: 'text', text: '（这一轮 AI 没有给出内容，可以在下面重新描述）' }
+    }
+
+    if (round.options.length === 0) {
+      return streaming && isActive ? { kind: 'pending', text: '正在分析…' } : null
+    }
+
+    return {
+      kind: 'options',
+      options: round.options,
+      selectedId:
+        draft.selected !== null && draft.selected.roundIndex === index
+          ? draft.selected.option.id
+          : null,
+      // 流没结束时后面可能还有新选项，现在选中的编号随时会被打乱
+      disabled: !isActive || streaming,
+      hint: !isActive
+        ? '这是之前某一轮的选项，仅供回看'
+        : streaming
+          ? `AI 正在继续给出选项，已收到 ${round.options.length} 条…`
+          : undefined,
+      onSelect: (option) =>
+        setDraft((prev) => ({ ...prev, selected: { roundIndex: index, option } })),
+    }
+  }
 
   return (
     <Card
       className="page-transition"
       title="智能提单"
+      style={{
+        // 占满内容区（顶栏 64 + 上下外边距各 16），对话区才能撑开、输入框才能贴底。
+        // 用 dvh 而不是 vh：手机浏览器地址栏收起时 vh 不会跟着变，输入框会被顶出屏幕
+        height: 'calc(100dvh - 96px)',
+        minHeight: 460,
+        display: 'flex',
+        flexDirection: 'column',
+      }}
+      styles={{
+        body: { flex: 1, minHeight: 0, display: 'flex', flexDirection: 'column', gap: 12 },
+      }}
       extra={
         draft.rounds.length > 0 ? (
           <Button icon={<ReloadOutlined />} onClick={onReset}>
@@ -180,177 +291,201 @@ export default function IntentInference() {
         ) : null
       }
     >
-      <Space direction="vertical" size="middle" style={{ width: '100%' }}>
-        <Alert
-          type="info"
-          showIcon
-          message="先描述你遇到的问题，AI 会列出几种可能的意图让你确认"
-          description={
-            <Paragraph style={{ margin: 0 }}>
-              每一条选项右侧的概率是 AI 的把握程度。如果都不像，就在下面继续补充说明 ——
-              <Text strong> 追加说明后 AI 会重新给一组选项，当前这一组会被替换掉</Text>
-              （历史轮次可以在上方展开回看）。选定一条后即可进入填单。
-            </Paragraph>
-          }
-        />
+      {/* 只有这一块滚动；输入框是它的兄弟节点，永远贴在底部 */}
+      <div
+        ref={scrollRef}
+        style={{
+          flex: 1,
+          minHeight: 0,
+          overflowY: 'auto',
+          display: 'flex',
+          flexDirection: 'column',
+          gap: 16,
+          paddingInline: 4,
+        }}
+      >
+        {draft.rounds.length === 0 && (
+          <div
+            style={{
+              border: `1px solid ${token.colorBorderSecondary}`,
+              borderRadius: token.borderRadiusLG,
+              background: token.colorFillQuaternary,
+              padding: token.paddingLG,
+            }}
+          >
+            <Flex gap={12} align="flex-start">
+              <Avatar
+                size={40}
+                icon={<RobotOutlined />}
+                style={{
+                  flexShrink: 0,
+                  background: token.colorPrimary,
+                  color: token.colorTextLightSolid,
+                }}
+              />
+              <div style={{ minWidth: 0 }}>
+                <Text strong style={{ fontSize: token.fontSizeLG }}>
+                  你好，我是智能提单助手
+                </Text>
+                <Paragraph style={{ margin: '6px 0 0' }}>
+                  把遇到的问题告诉我就行：我来判断它属于哪一类工单 —— 信息够了，我会列出几种可能让你挑；
+                  还缺关键信息，我会先反问你一句。你确认之后，我再帮你把工单填好。
+                </Paragraph>
+              </div>
+            </Flex>
 
-        {historyRounds.length > 0 && (
-          <Collapse
-            items={historyRounds.map((round, index) => ({
-              key: String(index),
-              label: `历史轮次 ${index + 1}：${round.input}`,
-              children: (
-                <Space direction="vertical" size={4} style={{ width: '100%' }}>
-                  <Text type="secondary">这一轮 AI 给出的选项：</Text>
-                  {round.options.length === 0 ? (
-                    <Text type="secondary">（无）</Text>
-                  ) : (
-                    round.options.map((option) => (
-                      <Text key={option.id}>
-                        #{option.id} {option.title}（{option.probability}%）
-                      </Text>
-                    ))
-                  )}
-                </Space>
-              ),
-            }))}
-          />
-        )}
-
-        {activeRound === null ? (
-          <Space direction="vertical" size="small" style={{ width: '100%' }}>
-            <TextArea
-              value={input}
-              onChange={(event) => setInput(event.target.value)}
-              placeholder="例如：财务系统导出报表时一直转圈，十分钟也不出来"
-              autoSize={{ minRows: 3, maxRows: 8 }}
-              maxLength={2000}
-              showCount
-            />
-            <Button
-              type="primary"
-              icon={<ThunderboltOutlined />}
-              loading={streaming}
-              disabled={input.trim() === ''}
-              onClick={onAnalyse}
-            >
-              开始分析
-            </Button>
-          </Space>
-        ) : (
-          <>
-            {/* antd v6 把标题位置从 orientation 拆成了 titlePlacement（orientation 现在只表示横/竖） */}
-            <Divider titlePlacement="start" plain>
-              本轮选项（{activeRound.options.length}）
-            </Divider>
-
-            {activeRound.options.length === 0 ? (
-              <Space direction="vertical" align="center" style={{ width: '100%', padding: '24px 0' }}>
-                {streaming ? (
-                  <>
-                    <Spin />
-                    <Text type="secondary">正在分析…</Text>
-                  </>
-                ) : (
-                  <Empty
-                    image={Empty.PRESENTED_IMAGE_SIMPLE}
-                    description="这一轮没有给出选项，可以在下面补充说明后重试"
-                  />
-                )}
-              </Space>
-            ) : (
-              <Space direction="vertical" size="small" style={{ width: '100%' }}>
-                {activeRound.options.map((option) => (
-                  <IntentOptionCard
-                    key={option.id}
-                    option={option}
-                    selected={selectedHere === option.id}
-                    disabled={streaming}
-                    onSelect={(picked: IntentOption) =>
-                      setDraft((prev) => ({
-                        ...prev,
-                        // 选中的是"当前最后一轮"里的某一条，下标在这里现算
-                        selected: { roundIndex: prev.rounds.length - 1, option: picked },
-                      }))
-                    }
-                  />
+            <div style={{ marginTop: token.marginMD }}>
+              <Text strong>描述时带上这三点，我猜得更准</Text>
+              <Flex vertical gap={6} style={{ marginTop: 8 }}>
+                {GUIDE_TIPS.map((tip, index) => (
+                  <Flex key={tip.label} gap={8} align="flex-start">
+                    <span
+                      style={{
+                        flexShrink: 0,
+                        width: 18,
+                        height: 18,
+                        borderRadius: '50%',
+                        background: token.colorPrimaryBg,
+                        color: token.colorPrimary,
+                        fontSize: token.fontSizeSM,
+                        lineHeight: '18px',
+                        textAlign: 'center',
+                      }}
+                    >
+                      {index + 1}
+                    </span>
+                    <div style={{ fontSize: token.fontSize, lineHeight: token.lineHeight }}>
+                      <Text strong>{tip.label}</Text>
+                      <Text type="secondary">：{tip.hint}</Text>
+                    </div>
+                  </Flex>
                 ))}
-              </Space>
-            )}
-
-            {/* 已经出卡片之后还得让人知道"没完"：选项是逐条回来的，先到的那张很容易
-                被当成全部，用户就拿着它直接去建单了 */}
-            {streaming && activeRound.options.length > 0 && (
-              <Space size={6}>
-                <Spin size="small" />
-                <Text type="secondary">
-                  AI 正在继续给出选项，已收到 {activeRound.options.length} 条…
-                </Text>
-              </Space>
-            )}
-
-            {streaming && (
-              <Button danger onClick={onInterrupt}>
-                中断本轮分析
-              </Button>
-            )}
-
-            {/* antd v6 把标题位置从 orientation 拆成了 titlePlacement（orientation 现在只表示横/竖） */}
-            <Divider titlePlacement="start" plain>
-              补充说明
-            </Divider>
-            <TextArea
-              value={supplement}
-              onChange={(event) => setSupplement(event.target.value)}
-              placeholder="补充一些细节，比如：是昨天升级之后才开始的；只影响导出，查询正常"
-              autoSize={{ minRows: 2, maxRows: 6 }}
-              maxLength={2000}
-              showCount
-              disabled={streaming}
-            />
-            <Space wrap>
-              <Button
-                icon={<SendOutlined />}
-                loading={streaming}
-                disabled={supplement.trim() === ''}
-                onClick={onSupplement}
+              </Flex>
+              <Text
+                type="secondary"
+                style={{ display: 'block', marginTop: token.marginXS, fontSize: token.fontSizeSM }}
               >
-                继续分析
-              </Button>
-              <Auth
-                code={AI_PERMISSIONS.assistSubmit}
-                fallback={<Text type="secondary">没有「AI 辅助填单」权限，请联系管理员</Text>}
-              >
-                <Button
-                  type="primary"
-                  disabled={selected === null || streaming}
-                  onClick={onCreateWorkOrder}
-                >
-                  用选中的选项生成工单
-                </Button>
-              </Auth>
-              {selected !== null && selected.roundIndex === activeIndex && (
-                <Text type="secondary">
-                  已选中 #{selected.option.id} {selected.option.title}
-                </Text>
-              )}
-            </Space>
-          </>
+                给出的选项都不像？接着补充说明就好，我会重新给一组。
+              </Text>
+            </div>
+          </div>
         )}
 
-        {error !== null && <Alert type="error" showIcon message="分析失败" description={error} />}
+        {draft.rounds.map((round, index) => {
+          const content = aiBubble(round, index)
+          return (
+            <Fragment key={index}>
+              <ChatBubble role="user" content={{ kind: 'text', text: round.input }} />
+              {content !== null && (
+                <ChatBubble role="ai" content={content} tag={round.model} />
+              )}
+            </Fragment>
+          )
+        })}
 
         {noOption && (
-          <Alert
-            type="warning"
-            showIcon
-            message="没有解析出任何选项"
-            description="模型这次的输出不符合约定的 JSONL 格式。展开下面的「原始输出」可以看到它到底返回了什么；补充说明后重试通常就好了。"
+          <ChatBubble
+            role="ai"
+            content={{
+              kind: 'notice',
+              level: 'warning',
+              title: '没有解析出任何选项',
+              description: '模型这次的输出不符合约定的格式。补充说明后重试通常就好了。',
+            }}
           />
         )}
 
-        <RawOutputPanel lines={rawLines} />
-      </Space>
+        {error !== null && (
+          <ChatBubble
+            role="ai"
+            content={{ kind: 'notice', level: 'error', title: '分析失败', description: error }}
+          />
+        )}
+      </div>
+
+      {selectedHere !== null && (
+        <Auth
+          code={AI_PERMISSIONS.assistSubmit}
+          fallback={<Text type="secondary">没有「AI 辅助填单」权限，请联系管理员</Text>}
+        >
+          <Button
+            block
+            size="large"
+            type="primary"
+            icon={<FileAddOutlined />}
+            disabled={streaming}
+            onClick={onCreateWorkOrder}
+          >
+            用选中的选项生成工单（#{selectedHere.id} {selectedHere.title}）
+          </Button>
+        </Auth>
+      )}
+
+      <Flex gap={8} align="flex-end">
+        {/* 边框直接画在 textarea 上：可见区域就是可点区域，点框内任何地方都能落焦点。
+            字数绝对定位压在右下角（并让鼠标事件穿透），不占文字位置。
+            上下 8 + 一行文字 22 + 边框 2 = 40，正好等于右侧 size="large" 的按钮。 */}
+        <div style={{ position: 'relative', flex: 1, minWidth: 0, display: 'flex' }}>
+          <TextArea
+            // 右边留出 78px 给字数（最长的 "2000/2000" 约 60px + 12px 间距），文字不会跑到它底下
+            style={{ padding: '8px 78px 8px 12px' }}
+            value={composerValue}
+            onChange={(event) => setComposerValue(event.target.value)}
+            placeholder={
+              isFirst
+                ? '例如：财务系统导出报表时一直转圈'
+                : asking
+                  ? '回答它上面的问题，比如：昨天上午，行政楼'
+                  : '补充一些细节，比如：昨天升级之后才开始的'
+            }
+            // 单行起步，写长了自动长高（最多 6 行）
+            autoSize={{ minRows: 1, maxRows: 6 }}
+            maxLength={2000}
+            disabled={streaming}
+            // 回车即发送，换行用 Shift+Enter —— 聊天框的默认手势。
+            // 输入法正在组词时的回车是"选词"，不能当发送（否则中文用户每打一个词就发一次）
+            onPressEnter={(event) => {
+              if (event.shiftKey || event.nativeEvent.isComposing) {
+                return
+              }
+              event.preventDefault()
+              onSend()
+            }}
+          />
+          <Text
+            type="secondary"
+            style={{
+              position: 'absolute',
+              right: 12,
+              bottom: 8,
+              fontSize: token.fontSizeSM,
+              lineHeight: '22px',
+              whiteSpace: 'nowrap',
+              pointerEvents: 'none',
+            }}
+          >
+            {composerValue.length}/2000
+          </Text>
+        </div>
+
+        <Space size={8} style={{ flexShrink: 0 }}>
+          {streaming && (
+            <Button danger size="large" onClick={onInterrupt}>
+              中断
+            </Button>
+          )}
+          <Button
+            type="primary"
+            size="large"
+            icon={<SendOutlined />}
+            loading={streaming}
+            disabled={composerValue.trim() === ''}
+            onClick={onSend}
+          >
+            {isFirst ? '开始分析' : asking ? '提交回答' : '继续分析'}
+          </Button>
+        </Space>
+      </Flex>
     </Card>
   )
 }

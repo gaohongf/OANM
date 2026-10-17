@@ -3,11 +3,33 @@ import { buildUrl, getToken, notifyUnauthorized } from './http'
 /** 与 http.ts 保持同一个头名：sa-token 的 token 头，取自后端 `sa-token.token-name`。 */
 const TOKEN_HEADER = 'satoken'
 
-/** `start` 事件的数据。**`id` 就是 conversationId**，由后端在首轮生成。 */
+/**
+ * `start` 事件的数据。
+ *
+ * 两个接口的形状不完全一样，所以字段都是可选的：
+ * - 辅助填单：`{ id, model, time }`
+ * - 意图推断：`{ modelName, time }` —— 会话 id 改由随后的 `workflow` 事件给出
+ */
 export interface SseStartPayload {
-  id: string
-  model: string
+  /** 会话 id（辅助填单仍从这里取） */
+  id?: string
+  /** 模型名。两种写法并存，取先有的那个 */
+  model?: string
+  modelName?: string
   time: number
+}
+
+/**
+ * `chat` 事件的一帧：工作流某个节点的一次输出。
+ *
+ * `n` 是节点名 —— 同一轮里不会变，所以它在流里出现一次就能定下"这一轮是追问还是选项"。
+ * `d` 的形状由节点决定：文字节点给 token 字符串，结构化节点给对象。
+ */
+export interface SseChatFrame {
+  /** 节点名，如 `ask` / `options` */
+  n?: string
+  /** 该节点这一帧的数据 */
+  d?: unknown
 }
 
 export interface SseHandlers {
@@ -16,6 +38,16 @@ export interface SseHandlers {
    * 首轮调用必须把它存下来 —— 后续每一轮补充、以及最后提交工单都要带上它。
    */
   onStart?: (payload: SseStartPayload) => void
+  /**
+   * 工作流已经开始，这是本轮的 `threadId`。
+   * 它同时是要带回去的会话标识 —— 下一轮、以及后续调用都得原样传它，流程才接得上。
+   */
+  onWorkflow?: (threadId: string) => void
+  /**
+   * 工作流节点的流式输出。文字节点的 `d` 是 token 片段（不是整行），
+   * 拼接收在调用方那一层。
+   */
+  onChat?: (frame: SseChatFrame) => void
   /**
    * 一行完整文本。后端已经按 `\n` 切好了，这里收到的**不是** token 碎片，
    * 而是模型输出里的一整行。
@@ -64,7 +96,7 @@ export interface OpenSseOptions extends SseHandlers {
  * 调用方只需要写一处错误处理。setup 阶段的失败（网络、非 2xx）也在内部转成 onError。
  */
 export async function openSse(path: string, options: OpenSseOptions): Promise<void> {
-  const { signal, onStart, onDelta, onDone, onNotification, onError } = options
+  const { signal, onStart, onWorkflow, onChat, onDelta, onDone, onNotification, onError } = options
   const url = buildUrl(path, options.query)
   const fail = (message: string) => onError?.(message)
 
@@ -146,6 +178,25 @@ export async function openSse(path: string, options: OpenSseOptions): Promise<vo
           onStart?.(JSON.parse(data) as SseStartPayload)
         } catch {
           fail(`无法解析 start 事件：${data}`)
+        }
+        return
+      case 'workflow': {
+        try {
+          const payload = JSON.parse(data) as { threadId?: unknown }
+          // 没有 threadId 就当作没收到：后续轮次会退化成各说各的，但至少不会崩在这一帧上
+          if (typeof payload.threadId === 'string' && payload.threadId !== '') {
+            onWorkflow?.(payload.threadId)
+          }
+        } catch {
+          fail(`无法解析 workflow 事件：${data}`)
+        }
+        return
+      }
+      case 'chat':
+        try {
+          onChat?.(JSON.parse(data) as SseChatFrame)
+        } catch {
+          fail(`无法解析 chat 事件：${data}`)
         }
         return
       case 'delta':

@@ -19,6 +19,7 @@
         <sa-token.version>1.46.0</sa-token.version>
         <mybatis-plus.version>3.5.7</mybatis-plus.version>
         <mysql-connector.version>8.4.0</mysql-connector.version>
+        <redisson.version>3.45.1</redisson.version>
         <!-- MapStruct 1.6 起原生兼容 Lombok, 不再需要 lombok-mapstruct-binding -->
         <mapstruct.version>1.6.3</mapstruct.version>
         <!--
@@ -27,8 +28,9 @@
           升级 Spring Boot 后如果出现 Lombok 相关诡异报错, 先来对一下这个值。
         -->
         <lombok.version>1.18.46</lombok.version>
-        <spring-ai.version>1.0.7</spring-ai.version>
-        <spring-ai.chat-memory-repository-jdbc.version>1.0.9</spring-ai.chat-memory-repository-jdbc.version>
+        <spring-ai.version>1.1.2</spring-ai.version>
+        <spring-ai.chat-memory-repository-jdbc.version>1.1.2</spring-ai.chat-memory-repository-jdbc.version>
+        <spring-ai.alibaba.version>1.1.2.2</spring-ai.alibaba.version>
     </properties>
     <packaging>pom</packaging>
     <modules>
@@ -68,7 +70,13 @@
                 <type>pom</type>
                 <scope>import</scope>
             </dependency>
-            
+            <dependency>
+                <groupId>com.alibaba.cloud.ai</groupId>
+                <artifactId>spring-ai-alibaba-bom</artifactId>
+                <version>${spring-ai.alibaba.version}</version>
+                <type>pom</type>
+                <scope>import</scope>
+            </dependency>
             <!-- Spring Cloud依赖管理 -->
             <dependency>
                 <groupId>org.springframework.cloud</groupId>

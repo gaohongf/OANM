@@ -1,4 +1,4 @@
-import { Card, Progress, Space, Tag, theme, Typography } from 'antd'
+import { Card, Flex, Progress, Tag, theme, Typography } from 'antd'
 
 import type { IntentOption } from '../../../api/ai'
 
@@ -23,6 +23,10 @@ interface IntentOptionCardProps {
  * 这几个选项之间是**相对**关系（80 / 50 / 10），横向长度比孤立的一个百分数
  * 更容易一眼比较出来。
  *
+ * ## 为什么压成三行、内容只留一行
+ * 一组通常有 3-5 张卡，摊在对话里，每张多一行就是一屏。所以标题、编号、概率并成
+ * 一行，具体内容单行省略（悬停看全文），概率条细成一条底线。
+ *
  * ## 选中态为什么不只用背景色
  * 只用背景色的话，"选中"和"hover"看起来会很像。这里用主色描边 + 加粗左边框，
  * 和 hover 的区别在形状上而不是明度上。
@@ -36,6 +40,7 @@ export function IntentOptionCard({ option, selected, disabled = false, onSelect 
       hoverable={!disabled}
       // 卡片逐条出现时用它做入场动画（index.css 里唯一的全局类，且尊重 prefers-reduced-motion）
       className="page-transition"
+      styles={{ body: { padding: '10px 12px' } }}
       style={{
         borderColor: selected ? token.colorPrimary : undefined,
         borderInlineStartWidth: selected ? 4 : undefined,
@@ -49,25 +54,32 @@ export function IntentOptionCard({ option, selected, disabled = false, onSelect 
         }
       }}
     >
-      <Space direction="vertical" size={4} style={{ width: '100%' }}>
-        <Space size={8} wrap>
+      <Flex vertical gap={4}>
+        <Flex align="center" gap={8}>
           {/* 编号就是提交时带走的 userSelect，摆出来免得用户对不上 */}
-          <Tag color={selected ? 'blue' : undefined}>#{option.id}</Tag>
-          <Text strong>{option.title}</Text>
-        </Space>
-        {option.content !== '' && <Text type="secondary">{option.content}</Text>}
-        <Space size={8} style={{ width: '100%' }}>
-          <Text type="secondary" style={{ fontSize: token.fontSizeSM }}>
-            可能性
+          <Tag color={selected ? 'blue' : undefined} style={{ marginInlineEnd: 0 }}>
+            #{option.id}
+          </Tag>
+          <Text strong ellipsis style={{ flex: 1, minWidth: 0 }}>
+            {option.title}
           </Text>
-          <Progress
-            percent={option.probability}
-            size="small"
-            showInfo
-            style={{ flex: 1, marginBottom: 0, minWidth: 120 }}
-          />
-        </Space>
-      </Space>
+          <Text type="secondary" style={{ fontSize: token.fontSizeSM, whiteSpace: 'nowrap' }}>
+            {option.probability}%
+          </Text>
+        </Flex>
+        {option.content !== '' && (
+          // 单行省略：一组卡片要能一屏扫完，完整内容在悬停的浮层里
+          <Text type="secondary" ellipsis={{ tooltip: option.content }} style={{ fontSize: token.fontSizeSM }}>
+            {option.content}
+          </Text>
+        )}
+        <Progress
+          percent={option.probability}
+          size="small"
+          showInfo={false}
+          style={{ marginBottom: 0 }}
+        />
+      </Flex>
     </Card>
   )
 }

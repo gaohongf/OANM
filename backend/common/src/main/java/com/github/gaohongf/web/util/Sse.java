@@ -6,6 +6,7 @@ import org.springframework.http.codec.ServerSentEvent;
 import org.springframework.lang.NonNull;
 
 import com.fasterxml.jackson.databind.ObjectMapper;
+import com.github.gaohongf.web.sse.SseElement;
 
 public final class Sse {
 
@@ -28,7 +29,9 @@ public final class Sse {
     public static ServerSentEvent<String> start(SsePayload payload) {
         return standardize(EVENT_START, toJson(payload));
     }
-
+    public static ServerSentEvent<String> message(SseElement element) {
+        return standardize(element.event(), toJson(element));
+    }
     public static ServerSentEvent<String> done(String reason) {
         return standardize(EVENT_DONE, toJson(Map.of(DONE_REASON_KEY, reason)));
     }
@@ -41,6 +44,15 @@ public final class Sse {
         return standardize(EVENT_DELTA, toJson(map));
     }
 
+    /**
+     * 把一个<b>对象</b>序列化成 JSON 后下发。
+     */
+    public static ServerSentEvent<String> delta(Object obj) {
+        if (obj instanceof String str) {
+            return delta(str);
+        }
+        return standardize(EVENT_DELTA, toJson(obj));
+    }
     public static ServerSentEvent<String> error(String error) {
         return standardize(EVENT_ERROR, error);
     }

@@ -27,15 +27,49 @@ import type { IntentOption } from './ai'
 
 const STORAGE_KEY = 'oanm.ai.draft'
 
-/** 一轮：用户说的一句话 + AI 针对它给出的选项 */
+/**
+ * 这一轮由哪个节点作答 —— 直接沿用后端工作流里的节点名，
+ * 前端不另起一套叫法，免得两边各维护一份映射又慢慢漂开。
+ *
+ * `PENDING` 是前端自己的状态：请求发出去了、`chat` 帧还没回来。
+ */
+export type IntentRoundMode = 'PENDING' | 'ask' | 'options'
+
+/** 一轮：用户说的一句话 + AI 针对它的作答（一组选项，或者一句追问） */
 export interface IntentRound {
   /** 用户这一轮的**真实输入**（不是模型转述） */
   input: string
+  /**
+   * AI 以什么形态作答。
+   *
+   * `PENDING` 只在流的前几百毫秒存在（从发起到收到路由帧），
+   * 界面靠它区分"正在分析"和"给了选项"——否则那段时间会显示成"没给出选项"。
+   */
+  mode: IntentRoundMode
+  /**
+   * 这一轮由谁作答 —— 目前是模型名（`start` 事件里的 `modelName`），显示在气泡名字旁边。
+   * 为以后的人工介入留位：轮到坐席接手时，这里放坐席标识，展示位置不变。
+   * 空字符串表示还不知道（旧草稿、或流在 `start` 之前就断了）。
+   */
+  model: string
+  /** `mode === 'ask'` 时 AI 追问的原文（纯文本，带换行） */
+  question: string
   options: IntentOption[]
 }
 
+/**
+ * 校验用的"宽松轮次"：本版本之前的草稿只有 `input` 和 `options`。
+ *
+ * 校验只针对**当时就存在**的字段，缺的 `mode`/`question` 交给 `normalizeRound` 补 ——
+ * 为两个能安全取默认值的字段把整份草稿判死，代价是用户丢掉前面几轮说过的话。
+ */
+type StoredRound = Pick<IntentRound, 'input' | 'options'> &
+  Partial<Pick<IntentRound, 'mode' | 'model' | 'question'>>
+
+type StoredDraft = Omit<IntentDraft, 'rounds'> & { rounds: StoredRound[] }
+
 export interface IntentDraft {
-  /** 首轮由后端生成，在 `start` 事件里回来。首轮流未开始时为 null */
+  /** 工作流的 threadId。首轮由后端生成，在 `workflow` 事件里回来；流未开始时为 null */
   conversationId: string | null
   rounds: IntentRound[]
   selected: { roundIndex: number; option: IntentOption } | null
@@ -64,10 +98,36 @@ export function loadDraft(): IntentDraft | null {
     // 选中的那一条单独校验、单独丢弃：填单页要拿它的 option.id 去发起 AI 填写
     // （`selected.option.id` 是个会直接抛错的下标访问），而它坏掉的原因和轮次无关 ——
     // 一处坏掉不该把前面几轮的输入一起废掉。
-    return { ...parsed, selected: isSelection(parsed.selected) ? parsed.selected : null }
+    return {
+      ...parsed,
+      rounds: parsed.rounds.map(normalizeRound),
+      selected: isSelection(parsed.selected) ? parsed.selected : null,
+    }
   } catch {
     return null
   }
+}
+
+/**
+ * 把存下来的轮次补成完整的形状。
+ *
+ * - 旧草稿里的 `OPTIONS` / `PROBLEM` 是上一版前端自己起的名字（那时后端发的是
+ *   `routing_type` 帧）。翻成现在的节点名，否则用户刷新后会把一句追问显示成"没有选项"。
+ * - `PENDING` 只可能来自"流式输出到一半时刷新了"，而刷新之后没有任何流在跑，
+ *   转圈会永远转下去。落到 `options` 分支，用户看到的是可操作的提示而不是假死。
+ */
+function normalizeRound(round: StoredRound): IntentRound {
+  return {
+    input: round.input,
+    mode: normalizeMode(round.mode),
+    model: typeof round.model === 'string' ? round.model : '',
+    question: typeof round.question === 'string' ? round.question : '',
+    options: round.options,
+  }
+}
+
+function normalizeMode(value: unknown): IntentRoundMode {
+  return value === 'ask' || value === 'PROBLEM' ? 'ask' : 'options'
 }
 
 export function saveDraft(draft: IntentDraft): void {
@@ -130,7 +190,7 @@ function isSelection(value: unknown): value is IntentDraft['selected'] {
 }
 
 /** 形状校验。sessionStorage 里的东西可能是上个版本写的，不能当作可信输入。 */
-function isDraft(value: unknown): value is IntentDraft {
+function isDraft(value: unknown): value is StoredDraft {
   if (typeof value !== 'object' || value === null) {
     return false
   }
