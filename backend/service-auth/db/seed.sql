@@ -1,6 +1,6 @@
 -- ============================================================
 -- service-auth 引导数据
--- 数据库: MySQL 8.x
+-- 数据库: PostgreSQL 18
 --
 -- 用途: 解决"第一个管理员怎么进去"这个鸡生蛋问题 ——
 --       要管菜单/路由/角色, 你得先有 POST:/api/auth/menus 这类权限;
@@ -18,12 +18,10 @@
 -- 关于 id 为什么是负数:
 --   permissions.id 平时由应用侧用雪花算法赋值, 雪花 id 永远是正数。
 --   所以负数 id 不可能和任何应用写入的行冲突 —— 而这正是种子数据最怕的事:
---   随便挑一个正数 id, 一旦撞上已有行, ON DUPLICATE KEY 会把那一行的
+--   随便挑一个正数 id, 一旦撞上已有行, ON CONFLICT 会把那一行的
 --   permission_key 改掉, 等于毁掉真实数据。
 --   约定: 负数 id = 手写的内置行。
 -- ============================================================
-
-SET NAMES utf8mb4;
 
 -- ------------------------------------------------------------
 -- 1. admin 角色
@@ -31,7 +29,6 @@ SET NAMES utf8mb4;
 -- ------------------------------------------------------------
 INSERT INTO roles (role_name, label, create_time, update_time, deleted, version)
 SELECT 'admin', '管理员', NOW(), NOW(), 0, 0
-FROM DUAL
 WHERE NOT EXISTS (SELECT 1 FROM roles WHERE role_name = 'admin');
 
 -- ------------------------------------------------------------
@@ -48,7 +45,6 @@ WHERE NOT EXISTS (SELECT 1 FROM roles WHERE role_name = 'admin');
 -- ------------------------------------------------------------
 INSERT INTO permissions (id, permission_key, label, create_time, update_time, deleted, version)
 SELECT -1, '*', '全部权限（超级管理员）', NOW(), NOW(), 0, 0
-FROM DUAL
 WHERE NOT EXISTS (SELECT 1 FROM permissions WHERE permission_key = '*');
 
 -- ------------------------------------------------------------
@@ -56,7 +52,6 @@ WHERE NOT EXISTS (SELECT 1 FROM permissions WHERE permission_key = '*');
 -- ------------------------------------------------------------
 INSERT INTO role_permissions (role_name, permission_id, create_time, update_time, deleted, version)
 SELECT 'admin', -1, NOW(), NOW(), 0, 0
-FROM DUAL
 WHERE NOT EXISTS (SELECT 1
                   FROM role_permissions rp
                            INNER JOIN permissions p ON p.id = rp.permission_id
@@ -82,79 +77,79 @@ WHERE NOT EXISTS (SELECT 1
 --     否则菜单的 permission_id 子查询会取到 NULL, 菜单会变成"登录即可见"(静默失去门禁)。
 INSERT INTO permissions (id, permission_key, label, create_time, update_time, deleted, version)
 SELECT -2, 'GET:/api/ops/work_order/{id}', '查看工单', NOW(), NOW(), 0, 0
-FROM DUAL WHERE NOT EXISTS (SELECT 1 FROM permissions WHERE permission_key = 'GET:/api/ops/work_order/{id}');
+WHERE NOT EXISTS (SELECT 1 FROM permissions WHERE permission_key = 'GET:/api/ops/work_order/{id}');
 
 INSERT INTO permissions (id, permission_key, label, create_time, update_time, deleted, version)
 SELECT -3, 'GET:/api/auth/menus', '查看菜单', NOW(), NOW(), 0, 0
-FROM DUAL WHERE NOT EXISTS (SELECT 1 FROM permissions WHERE permission_key = 'GET:/api/auth/menus');
+WHERE NOT EXISTS (SELECT 1 FROM permissions WHERE permission_key = 'GET:/api/auth/menus');
 
 INSERT INTO permissions (id, permission_key, label, create_time, update_time, deleted, version)
 SELECT -4, 'GET:/api/auth/roles', '查看角色', NOW(), NOW(), 0, 0
-FROM DUAL WHERE NOT EXISTS (SELECT 1 FROM permissions WHERE permission_key = 'GET:/api/auth/roles');
+WHERE NOT EXISTS (SELECT 1 FROM permissions WHERE permission_key = 'GET:/api/auth/roles');
 
 INSERT INTO permissions (id, permission_key, label, create_time, update_time, deleted, version)
 SELECT -5, 'GET:/api/auth/users', '查看用户', NOW(), NOW(), 0, 0
-FROM DUAL WHERE NOT EXISTS (SELECT 1 FROM permissions WHERE permission_key = 'GET:/api/auth/users');
+WHERE NOT EXISTS (SELECT 1 FROM permissions WHERE permission_key = 'GET:/api/auth/users');
 
 INSERT INTO permissions (id, permission_key, label, create_time, update_time, deleted, version)
 SELECT -6, 'GET:/api/auth/permissions', '查看权限', NOW(), NOW(), 0, 0
-FROM DUAL WHERE NOT EXISTS (SELECT 1 FROM permissions WHERE permission_key = 'GET:/api/auth/permissions');
+WHERE NOT EXISTS (SELECT 1 FROM permissions WHERE permission_key = 'GET:/api/auth/permissions');
 
 INSERT INTO permissions (id, permission_key, label, create_time, update_time, deleted, version)
 SELECT -7, 'GET:/api/auth/api-routes', '查看路由', NOW(), NOW(), 0, 0
-FROM DUAL WHERE NOT EXISTS (SELECT 1 FROM permissions WHERE permission_key = 'GET:/api/auth/api-routes');
+WHERE NOT EXISTS (SELECT 1 FROM permissions WHERE permission_key = 'GET:/api/auth/api-routes');
 
 -- 4.2 顶级节点
 INSERT INTO menus (id, parent_id, name, path, component, icon, sort, hidden, keep_alive, permission_id, enabled, locked, source, create_time, update_time, deleted, version)
-SELECT -10, NULL, '概览', '/dashboard', 'Dashboard', 'dashboard', 1, 0, 0, NULL, 1, 0, 'MANUAL', NOW(), NOW(), 0, 0
-FROM DUAL WHERE NOT EXISTS (SELECT 1 FROM menus WHERE id = -10);
+SELECT -10, NULL, '概览', '/dashboard', 'Dashboard', 'dashboard', 1, FALSE, FALSE, NULL, TRUE, FALSE, 'MANUAL', NOW(), NOW(), 0, 0
+WHERE NOT EXISTS (SELECT 1 FROM menus WHERE id = -10);
 
 INSERT INTO menus (id, parent_id, name, path, component, icon, sort, hidden, keep_alive, permission_id, enabled, locked, source, create_time, update_time, deleted, version)
-SELECT -20, NULL, '运维管理', NULL, NULL, 'setting', 10, 0, 0, NULL, 1, 0, 'MANUAL', NOW(), NOW(), 0, 0
-FROM DUAL WHERE NOT EXISTS (SELECT 1 FROM menus WHERE id = -20);
+SELECT -20, NULL, '运维管理', NULL, NULL, 'setting', 10, FALSE, FALSE, NULL, TRUE, FALSE, 'MANUAL', NOW(), NOW(), 0, 0
+WHERE NOT EXISTS (SELECT 1 FROM menus WHERE id = -20);
 
 INSERT INTO menus (id, parent_id, name, path, component, icon, sort, hidden, keep_alive, permission_id, enabled, locked, source, create_time, update_time, deleted, version)
-SELECT -30, NULL, '系统管理', NULL, NULL, 'team', 20, 0, 0, NULL, 1, 0, 'MANUAL', NOW(), NOW(), 0, 0
-FROM DUAL WHERE NOT EXISTS (SELECT 1 FROM menus WHERE id = -30);
+SELECT -30, NULL, '系统管理', NULL, NULL, 'team', 20, FALSE, FALSE, NULL, TRUE, FALSE, 'MANUAL', NOW(), NOW(), 0, 0
+WHERE NOT EXISTS (SELECT 1 FROM menus WHERE id = -30);
 
 -- 4.3 子节点。permission_id 按 key 现查, 这样无论权限行是种子建的(负 id)
 --     还是后来手工/自注册建的(雪花 id), 都能挂对。
 INSERT INTO menus (id, parent_id, name, path, component, icon, sort, hidden, keep_alive, permission_id, enabled, locked, source, create_time, update_time, deleted, version)
-SELECT -21, -20, '工单管理', '/ops/work-order', 'ops/WorkOrder', 'file', 1, 0, 1,
+SELECT -21, -20, '工单管理', '/ops/work-order', 'ops/WorkOrder', 'file', 1, FALSE, TRUE,
        (SELECT id FROM permissions WHERE permission_key = 'GET:/api/ops/work_order/{id}'),
-       1, 0, 'MANUAL', NOW(), NOW(), 0, 0
-FROM DUAL WHERE NOT EXISTS (SELECT 1 FROM menus WHERE id = -21);
+       TRUE, FALSE, 'MANUAL', NOW(), NOW(), 0, 0
+WHERE NOT EXISTS (SELECT 1 FROM menus WHERE id = -21);
 
 INSERT INTO menus (id, parent_id, name, path, component, icon, sort, hidden, keep_alive, permission_id, enabled, locked, source, create_time, update_time, deleted, version)
-SELECT -31, -30, '菜单管理', '/system/menus', 'system/MenuList', 'appstore', 1, 0, 0,
+SELECT -31, -30, '菜单管理', '/system/menus', 'system/MenuList', 'appstore', 1, FALSE, FALSE,
        (SELECT id FROM permissions WHERE permission_key = 'GET:/api/auth/menus'),
-       1, 0, 'MANUAL', NOW(), NOW(), 0, 0
-FROM DUAL WHERE NOT EXISTS (SELECT 1 FROM menus WHERE id = -31);
+       TRUE, FALSE, 'MANUAL', NOW(), NOW(), 0, 0
+WHERE NOT EXISTS (SELECT 1 FROM menus WHERE id = -31);
 
 INSERT INTO menus (id, parent_id, name, path, component, icon, sort, hidden, keep_alive, permission_id, enabled, locked, source, create_time, update_time, deleted, version)
-SELECT -32, -30, '角色管理', '/system/roles', 'system/RoleList', 'user', 2, 0, 0,
+SELECT -32, -30, '角色管理', '/system/roles', 'system/RoleList', 'user', 2, FALSE, FALSE,
        (SELECT id FROM permissions WHERE permission_key = 'GET:/api/auth/roles'),
-       1, 0, 'MANUAL', NOW(), NOW(), 0, 0
-FROM DUAL WHERE NOT EXISTS (SELECT 1 FROM menus WHERE id = -32);
+       TRUE, FALSE, 'MANUAL', NOW(), NOW(), 0, 0
+WHERE NOT EXISTS (SELECT 1 FROM menus WHERE id = -32);
 
 INSERT INTO menus (id, parent_id, name, path, component, icon, sort, hidden, keep_alive, permission_id, enabled, locked, source, create_time, update_time, deleted, version)
-SELECT -33, -30, '用户管理', '/system/users', 'system/UserList', 'user', 3, 0, 0,
+SELECT -33, -30, '用户管理', '/system/users', 'system/UserList', 'user', 3, FALSE, FALSE,
        (SELECT id FROM permissions WHERE permission_key = 'GET:/api/auth/users'),
-       1, 0, 'MANUAL', NOW(), NOW(), 0, 0
-FROM DUAL WHERE NOT EXISTS (SELECT 1 FROM menus WHERE id = -33);
+       TRUE, FALSE, 'MANUAL', NOW(), NOW(), 0, 0
+WHERE NOT EXISTS (SELECT 1 FROM menus WHERE id = -33);
 
 INSERT INTO menus (id, parent_id, name, path, component, icon, sort, hidden, keep_alive, permission_id, enabled, locked, source, create_time, update_time, deleted, version)
-SELECT -34, -30, '权限管理', '/system/permissions', 'system/PermissionList', 'api', 4, 0, 0,
+SELECT -34, -30, '权限管理', '/system/permissions', 'system/PermissionList', 'api', 4, FALSE, FALSE,
        (SELECT id FROM permissions WHERE permission_key = 'GET:/api/auth/permissions'),
-       1, 0, 'MANUAL', NOW(), NOW(), 0, 0
-FROM DUAL WHERE NOT EXISTS (SELECT 1 FROM menus WHERE id = -34);
+       TRUE, FALSE, 'MANUAL', NOW(), NOW(), 0, 0
+WHERE NOT EXISTS (SELECT 1 FROM menus WHERE id = -34);
 
 -- 路由管理用 setting 图标（与"运维管理"目录同名图标，但它们在树的不同分支，不会混淆）
 INSERT INTO menus (id, parent_id, name, path, component, icon, sort, hidden, keep_alive, permission_id, enabled, locked, source, create_time, update_time, deleted, version)
-SELECT -35, -30, '路由管理', '/system/routes', 'system/ApiRouteList', 'setting', 5, 0, 0,
+SELECT -35, -30, '路由管理', '/system/routes', 'system/ApiRouteList', 'setting', 5, FALSE, FALSE,
        (SELECT id FROM permissions WHERE permission_key = 'GET:/api/auth/api-routes'),
-       1, 0, 'MANUAL', NOW(), NOW(), 0, 0
-FROM DUAL WHERE NOT EXISTS (SELECT 1 FROM menus WHERE id = -35);
+       TRUE, FALSE, 'MANUAL', NOW(), NOW(), 0, 0
+WHERE NOT EXISTS (SELECT 1 FROM menus WHERE id = -35);
 
 -- ------------------------------------------------------------
 -- 5. 把第一个用户挂上 admin —— 无法预知是哪个用户, 所以只能人工执行一次。
@@ -167,40 +162,48 @@ FROM DUAL WHERE NOT EXISTS (SELECT 1 FROM menus WHERE id = -35);
 -- VALUES (<用户ID>, 'admin', NOW(), NOW(), 0, 0);
 
 -- ------------------------------------------------------------
--- 6. AI 工单助手（意图推断 + 辅助填单）
+-- 6. AI 工单助手（意图推断 + 工单生成）
 --
---    这两个页面是 SSE 流式接口的界面, 和其它页面一样需要菜单 + 权限才能进去。
+--    意图推断与工单生成都在这一个页面里完成, 和其它页面一样需要菜单 + 权限才能进去。
 -- ------------------------------------------------------------
 
 -- 6.1 页面要挂的权限。
---     这两个键 service-ai 启动时会自注册出来, 那为什么还要在这里种一遍?
+--     这个键 service-ai 启动时会自注册出来, 那为什么还要在这里种一遍?
 --     因为种子脚本可能比服务先跑 —— 那时权限行还不存在, 6.2 的子查询就会取到 NULL,
 --     而 NULL 的 permission_id 意味着"登录即可见", 菜单会静默失去门禁(fail-open)。
 --     这里的 NOT EXISTS 保证了"谁先建都只有一行", 服务后来自注册时也会跳过。
 INSERT INTO permissions (id, permission_key, label, create_time, update_time, deleted, version)
 SELECT -8, 'GET:/api/ai/assistant/wo/uiii', '意图推断', NOW(), NOW(), 0, 0
-FROM DUAL WHERE NOT EXISTS (SELECT 1 FROM permissions WHERE permission_key = 'GET:/api/ai/assistant/wo/uiii');
-
-INSERT INTO permissions (id, permission_key, label, create_time, update_time, deleted, version)
-SELECT -9, 'GET:/api/ai/assistant/wo/assist-submit', 'AI 辅助填单', NOW(), NOW(), 0, 0
-FROM DUAL WHERE NOT EXISTS (SELECT 1 FROM permissions WHERE permission_key = 'GET:/api/ai/assistant/wo/assist-submit');
+WHERE NOT EXISTS (SELECT 1 FROM permissions WHERE permission_key = 'GET:/api/ai/assistant/wo/uiii');
 
 -- 6.2 菜单。component 必须与前端 src/pages/ 下的文件路径逐字一致(大小写敏感):
 --     src/pages/ops/IntentInference.tsx → 'ops/IntentInference'
---     src/pages/ops/AssistSubmit.tsx    → 'ops/AssistSubmit'
 INSERT INTO menus (id, parent_id, name, path, component, icon, sort, hidden, keep_alive, permission_id, enabled, locked, source, create_time, update_time, deleted, version)
-SELECT -22, -20, '智能提单', '/ops/ai/intent', 'ops/IntentInference', 'robot', 2, 0, 0,
+SELECT -22, -20, '智能提单', '/ops/ai/intent', 'ops/IntentInference', 'robot', 2, FALSE, FALSE,
        (SELECT id FROM permissions WHERE permission_key = 'GET:/api/ai/assistant/wo/uiii'),
-       1, 0, 'MANUAL', NOW(), NOW(), 0, 0
-FROM DUAL WHERE NOT EXISTS (SELECT 1 FROM menus WHERE id = -22);
+       TRUE, FALSE, 'MANUAL', NOW(), NOW(), 0, 0
+WHERE NOT EXISTS (SELECT 1 FROM menus WHERE id = -22);
 
-INSERT INTO menus (id, parent_id, name, path, component, icon, sort, hidden, keep_alive, permission_id, enabled, locked, source, create_time, update_time, deleted, version)
-SELECT -23, -20, 'AI 辅助填单', '/ops/ai/submit', 'ops/AssistSubmit', 'robot', 3, 0, 0,
-       (SELECT id FROM permissions WHERE permission_key = 'GET:/api/ai/assistant/wo/assist-submit'),
-       1, 0, 'MANUAL', NOW(), NOW(), 0, 0
-FROM DUAL WHERE NOT EXISTS (SELECT 1 FROM menus WHERE id = -23);
+-- 6.3 清理已经删掉的「AI 辅助填单」页。
+--
+--     填单流程已经并回智能提单页, 那个独立页面和它的 SSE 接口都不存在了。
+--     新库不会种这两行, 但已经跑起来的库里还留着, 表现为侧栏多一个点进去没内容的菜单、
+--     权限管理里多一条授了也没用的权限。
+--
+--     先删菜单、再删角色授权、最后删权限: menus.permission_id 和
+--     role_permissions.permission_id 都指向 permissions.id, 顺序反了会被外键挡住。
+--     物理删除而不是置 deleted=1: permission_key 上有唯一键, 墓碑行会让
+--     这个键日后万一重新注册时直接撞唯一键。
+DELETE FROM menus WHERE id = -23 OR component = 'ops/AssistSubmit';
 
--- 6.3 网关路由。
+DELETE FROM role_permissions
+WHERE permission_id IN (SELECT id FROM permissions
+                        WHERE permission_key = 'GET:/api/ai/assistant/wo/assist-submit');
+
+DELETE FROM permissions
+WHERE permission_key = 'GET:/api/ai/assistant/wo/assist-submit';
+
+-- 6.4 网关路由。
 --
 --     按 path_pattern 判重而不是按 id: 已经跑起来的库里, 这几行是管理员在
 --     路由管理界面手工建的(雪花 id), 而这里是保留负 id。判重键选错的话,
@@ -210,16 +213,16 @@ FROM DUAL WHERE NOT EXISTS (SELECT 1 FROM menus WHERE id = -23);
 --     彼此不重叠, 所以顺序只影响日志可读性, 但保持一致能避免"种子装的和我现在跑的
 --     不一样"这种难查的差异。
 INSERT INTO api_routes (id, name, path_pattern, uri, route_order, enabled, locked, source, create_time, update_time, deleted, version)
-SELECT -40, 'Work Order Service', '/api/ops/**', 'lb://service-work-order', 10, 1, 0, 'MANUAL', NOW(), NOW(), 0, 0
-FROM DUAL WHERE NOT EXISTS (SELECT 1 FROM api_routes WHERE path_pattern = '/api/ops/**');
+SELECT -40, 'Work Order Service', '/api/ops/**', 'lb://service-work-order', 10, TRUE, FALSE, 'MANUAL', NOW(), NOW(), 0, 0
+WHERE NOT EXISTS (SELECT 1 FROM api_routes WHERE path_pattern = '/api/ops/**');
 
 INSERT INTO api_routes (id, name, path_pattern, uri, route_order, enabled, locked, source, create_time, update_time, deleted, version)
-SELECT -41, 'AI Service', '/api/ai/**', 'lb://service-ai', 11, 1, 0, 'MANUAL', NOW(), NOW(), 0, 0
-FROM DUAL WHERE NOT EXISTS (SELECT 1 FROM api_routes WHERE path_pattern = '/api/ai/**');
+SELECT -41, 'AI Service', '/api/ai/**', 'lb://service-ai', 11, TRUE, FALSE, 'MANUAL', NOW(), NOW(), 0, 0
+WHERE NOT EXISTS (SELECT 1 FROM api_routes WHERE path_pattern = '/api/ai/**');
 
 INSERT INTO api_routes (id, name, path_pattern, uri, route_order, enabled, locked, source, create_time, update_time, deleted, version)
-SELECT -42, 'Auth Service', '/api/auth/**', 'lb://service-auth', 21, 1, 0, 'MANUAL', NOW(), NOW(), 0, 0
-FROM DUAL WHERE NOT EXISTS (SELECT 1 FROM api_routes WHERE path_pattern = '/api/auth/**');
+SELECT -42, 'Auth Service', '/api/auth/**', 'lb://service-auth', 21, TRUE, FALSE, 'MANUAL', NOW(), NOW(), 0, 0
+WHERE NOT EXISTS (SELECT 1 FROM api_routes WHERE path_pattern = '/api/auth/**');
 
 -- ------------------------------------------------------------
 -- 7. 一次性修复: 删除两个已经不存在端点的权限行
@@ -240,34 +243,3 @@ WHERE permission_id IN (SELECT id FROM permissions
 DELETE FROM permissions
 WHERE permission_key IN ('GET:/api/ai/assistant/wouiii',
                          'GET:/api/ai/assistant/wos');
-
--- ------------------------------------------------------------
--- 8. 消息中心（站内信）
---
---    这一段只有菜单和网关路由, <b>没有权限行</b> —— 这是刻意的:
---    读自己的收件箱是"登录就该能做"的事(与"取自己的菜单"同类), 不应当要求被授权,
---    否则新建的账号必须先被授一个站内信权限才收得到通知, 而这个前置条件没有任何道理。
---    所以那些端点标的是 @LoginOnly, 自注册的扫描器会直接跳过它们（它只收需要权限的端点）,
---    权限管理界面里也不会出现一堆没人该去授权的行。
--- ------------------------------------------------------------
-
--- 8.1 顶级菜单。
---     sort 5: 排在"概览"(1)之后、"运维管理"(10)之前 —— 消息是每天要看的东西,
---     不该沉在管理菜单下面。
---     icon 是 'bell', 它必须同时存在于前端 layouts/menuIcons.tsx 的白名单里,
---     否则会退化成默认图标（不会报错, 只是长得不对）。
-INSERT INTO menus (id, parent_id, name, path, component, icon, sort, hidden, keep_alive, permission_id, enabled, locked, source, create_time, update_time, deleted, version)
-SELECT -50, NULL, '消息中心', '/message/list', 'message/NotificationList', 'bell', 5, 0, 0, NULL, 1, 0, 'MANUAL', NOW(), NOW(), 0, 0
-FROM DUAL WHERE NOT EXISTS (SELECT 1 FROM menus WHERE id = -50);
-
--- 8.2 网关路由。
---     route_order 12: 与现有取值(ops 10 / ai 11 / auth 21)同一套约定, 数值越小越优先,
---     彼此不重叠。判重按 path_pattern 而不是按 id —— 已经跑起来的库里这一行可能是
---     管理员在路由管理界面手工建的(雪花 id), 而这里是保留负 id; 判重键选错的话,
---     同一条前缀会出现两行, 网关拿到两条同序路由, 表现是随机的 404。
---
---     网关只路由 /api/**（/auth/internal/** 因此天然不可达）, 而站内信的端点都在
---     /api/message/** 下, 所以这里的前缀就是安全边界本身。
-INSERT INTO api_routes (id, name, path_pattern, uri, route_order, enabled, locked, source, create_time, update_time, deleted, version)
-SELECT -43, 'Message Service', '/api/message/**', 'lb://service-message', 12, 1, 0, 'MANUAL', NOW(), NOW(), 0, 0
-FROM DUAL WHERE NOT EXISTS (SELECT 1 FROM api_routes WHERE path_pattern = '/api/message/**');

@@ -7,8 +7,6 @@ import java.util.UUID;
 import java.util.regex.Pattern;
 
 import org.springframework.ai.chat.client.ChatClient;
-import org.springframework.ai.model.openai.autoconfigure.OpenAiChatProperties;
-import org.springframework.http.codec.ServerSentEvent;
 import org.springframework.stereotype.Component;
 
 import com.alibaba.cloud.ai.graph.CompileConfig;
@@ -40,7 +38,9 @@ import static com.alibaba.cloud.ai.graph.StateGraph.*;
 public class WorkOrderWorkflowLauncher {
 
     public final static String GRAPH_NAME = "work-order-flow";
+    public final static String DRAFT_GRAPH_NAME = "work-order-draft";
     private final CompiledGraph graph;
+    private final CompiledGraph draftGraph;
     private static final Pattern INT = Pattern.compile("[+-]?\\d+");
 
     private final String systemPrompt = """
@@ -82,6 +82,27 @@ public class WorkOrderWorkflowLauncher {
                 .addEdge("againExtract", "validate")
                 .compile(CompileConfig.builder().saverConfig(SaverConfig.builder().register(redisSaver).build())
                         .interruptBefore("againExtract").build());
+
+        // 生成工单是另一条独立的小流程：START → draft → END。
+        //
+        // 它刻意不接对话图的那个中断点，也不注册 checkpoint：
+        // draft 需要的东西只有"哪段对话"和"选了第几项"，而对话内容在 ChatMemory 里
+        // （同一个 conversationId）。把生成塞进对话图，就必须让"继续对话"和"生成"
+        // 在共享的累积状态里分流 —— 那会把本来已经跑通的意图推断也一起拖进
+        // 恢复语义里，改错一处第一步就给不出选项。
+        this.draftGraph = new StateGraph(DRAFT_GRAPH_NAME, draftKeyStrategies())
+                .addNode("draft", new DraftNode(chatClient, dateTimeTools))
+                .addEdge(START, "draft")
+                .addEdge("draft", END)
+                .compile();
+    }
+
+    private static KeyStrategyFactory draftKeyStrategies() {
+        Map<String, KeyStrategy> strategies = new HashMap<>();
+        strategies.put("conversationId", new ReplaceStrategy());
+        strategies.put("userSelect", new ReplaceStrategy());
+        strategies.put("workOrderDraft", new ReplaceStrategy());
+        return () -> strategies;
     }
 
     private KeyStrategyFactory getKeyStrategyFactory() {
@@ -97,23 +118,42 @@ public class WorkOrderWorkflowLauncher {
         };
     }
 
-    public Flux<SseElement> stream(String userInput) {
-        String threadId = "wo-" + UUID.randomUUID();
-        return stream(threadId, userInput);
-    }
-
     public Flux<SseElement> stream(String threadId, String userInput) {
         if (threadId == null) {
             threadId = "wo-" + UUID.randomUUID().toString().replace("-", "");
         }
         RunnableConfig config = RunnableConfig.builder().threadId(threadId).build();
         // conversationId 必须和 threadId 一致：它是各节点写 ChatMemory 的 key，
-        // 也是客户端拿到的那个 id —— 后续 /wo/assist-submit 用同一个 id 才能接着这段对话。
+        // 也是客户端拿到的那个 id —— 后续生成工单用同一个 id 才能读到这段对话。
         // 不传的话 ExtractNode 会自己生成一个 UUID，那段记忆就再也没有人能读到了。
-        return graph.stream(Map.of("userInput", userInput, "conversationId", threadId), config)
+        return toSse(graph.stream(
+                Map.of("userInput", userInput, "conversationId", threadId), config),
+                threadId);
+    }
+
+    /**
+     * 用户选中了 {@code userSelect} 指向的选项，生成工单。
+     *
+     * <p>
+     * 走 {@code draftGraph}，不碰对话图的 checkpoint：这里需要的上下文全部在
+     * ChatMemory 里（key 就是 threadId 对应的 conversationId），对话状态怎么累积、
+     * 中断点停在哪，都不影响这次生成。{@code threadId} 在这里只用于日志和 SSE 的 workflow 事件。
+     */
+    public Flux<SseElement> select(String threadId, Integer userSelect) {
+        RunnableConfig config = RunnableConfig.builder().threadId(threadId).build();
+        return toSse(draftGraph.stream(
+                Map.of("conversationId", threadId, "userSelect", userSelect), config),
+                threadId);
+    }
+
+    private static Flux<SseElement> toSse(Flux<NodeOutput> outputs, String threadId) {
+        return outputs
                 .filter(output -> output instanceof StreamingOutput)
                 .cast(StreamingOutput.class)
-                .filter(output -> "ask".equals(output.node()) || "options".equals(output.node()))
+                // draft 是节点借一条单元素 Flux 带出来的工单对象，和 ask/options 走同一条通道
+                .filter(output -> "ask".equals(output.node())
+                        || "options".equals(output.node())
+                        || "draft".equals(output.node()))
                 .map(output -> new ChatEvent(output.node(), output.getOriginData()))
                 .subscribeOn(Schedulers.boundedElastic())
                 .cast(SseElement.class)

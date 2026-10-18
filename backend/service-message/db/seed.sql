@@ -1,6 +1,6 @@
 -- ============================================================
 -- service-message 引导数据
--- 数据库: MySQL 8.x
+-- 数据库: PostgreSQL 18
 --
 -- 现在只需要一条模板: 工单创建后通知超管的那条。其余模板随"谁要发通知"一起加,
 -- 不预先造假模板 —— 没人用的模板行会让人以为某个功能已经接好了。
@@ -11,8 +11,6 @@
 -- 应用侧写入的是雪花 id(永远为正), 负数 id 不可能与真实数据冲突。
 -- 约定: 负数 id = 手写的内置行。
 -- ============================================================
-
-SET NAMES utf8mb4;
 
 -- ------------------------------------------------------------
 -- 工单创建通知(站内信)
@@ -33,7 +31,6 @@ INSERT INTO message_templates (id, template_key, channel, title_template, conten
 SELECT -1, 'work_order.created', 'APP', '新的工单',
        '工单「{title}」已提交（类型: {typeLabel}），请及时处理。',
        1, '建单成功后通知 admin 角色的全部成员', NOW(), NOW(), 0, 0
-FROM DUAL
 WHERE NOT EXISTS (SELECT 1
                   FROM message_templates
                   WHERE template_key = 'work_order.created'

@@ -19,6 +19,7 @@
         <sa-token.version>1.46.0</sa-token.version>
         <mybatis-plus.version>3.5.7</mybatis-plus.version>
         <mysql-connector.version>8.4.0</mysql-connector.version>
+        <postgresql.driver.version>42.7.14</postgresql.driver.version>
         <redisson.version>3.45.1</redisson.version>
         <!-- MapStruct 1.6 起原生兼容 Lombok, 不再需要 lombok-mapstruct-binding -->
         <mapstruct.version>1.6.3</mapstruct.version>

@@ -3,13 +3,14 @@ import { App as AntdApp, Avatar, Button, Card, Flex, Input, Space, Typography, t
 import { FileAddOutlined, ReloadOutlined, RobotOutlined, SendOutlined } from '@ant-design/icons'
 import { useNavigate } from 'react-router'
 
-import { AI_PERMISSIONS, startIntentInference } from '../../api/ai'
-import type { IntentNode } from '../../api/ai'
-import { clearDraft, emptyDraft, loadDraft, saveDraft } from '../../api/aiSession'
+import { generateWorkOrderDraft, startIntentInference, submitWorkOrderDraft } from '../../api/ai'
+import type { IntentNode, WorkOrderDraft } from '../../api/ai'
+import { clearDraft, draftInputRounds, emptyDraft, loadDraft, saveDraft } from '../../api/aiSession'
 import type { IntentDraft, IntentRound } from '../../api/aiSession'
-import { Auth } from '../../permission/Auth'
 import { ChatBubble } from './components/ChatBubble'
 import type { BubbleContent } from './components/ChatBubble'
+import { WorkOrderDraftDrawer } from './components/WorkOrderDraftDrawer'
+import type { WorkOrderFormValues } from './components/WorkOrderDraftDrawer'
 
 const { Text, Paragraph } = Typography
 const { TextArea } = Input
@@ -25,28 +26,32 @@ const GUIDE_TIPS = [
 ]
 
 /**
- * 智能提单第一步：意图推断。
+ * 智能提单：意图推断 + 工单生成，都在这一页完成。
  *
  * ## 交互形状
  * 一整段对话：用户说的话靠右，AI 的作答靠左。AI 这一轮可能给一组候选意图卡片，
  * 也可能（缺时间、地点这类关键信息时）反过来问一句 —— 两种形态都是"这一轮它说了什么"，
  * 所以都落在同一条气泡里，只是气泡类型不同（见 `ChatBubble` 的 `BubbleContent`）。
  *
- * 后端是一个工作流（判定 → 追问 / 选项），每条 `chat` 帧带着产出它的节点名
- * （见 `api/ai.ts` 的 `IntentNode`），第一个 `chat` 帧就说明了本轮是哪种。
+ * 用户选中一条选项、点「生成工单」之后，会话末尾会多出一条工单气泡：
+ * 先显示骨架，生成完成后变成可点开的卡片。点右侧「查看并提交」在抽屉里确认/修改，
+ * 提交由 service-ai 带着当前登录态转发给工单服务。
+ *
+ * 后端是一个工作流（判定 → 追问 / 选项 → 生成），每条 `chat` 帧带着产出它的节点名
+ * （见 `api/ai.ts` 的 `IntentNode`）。生成也是同一段会话的下一轮，只是这次带的是
+ * 选中的选项编号。
  *
  * ## 为什么只保留一个输入框
  * "第一句描述"和"后续补充"对用户是同一件事，没必要换一个框、换一套按钮文案。
  * 只有 placeholder 和按钮文字会随上下文变（开始分析 / 继续分析 / 提交回答）。
  *
  * ## 为什么只有最新一轮的选项能点
- * 选项编号每轮都从 1 开始，而提交时只带编号。让用户选第二轮的 #2、却去提交第一轮的 #2，
+ * 选项编号每轮都从 1 开始，而生成时只带编号。让用户选第二轮的 #2、却去生成第一轮的 #2，
  * 后端分不清指的是哪一条。历史轮次的卡片保留下来但只读，并标一句"仅供回看"。
  *
  * ## 状态的持久化
- * 草稿（每轮的输入 + 选项 + 选中的那张）落在 sessionStorage 里，见 `api/aiSession.ts`。
- * 它同时是下一步的输入：填单页的「原始描述」**以这里记录的用户原话为准**，
- * 而不是信模型转述的版本。
+ * 草稿（每轮的输入 + 选项 + 选中的那张 + 最近生成的工单）落在 sessionStorage 里，
+ * 见 `api/aiSession.ts`。
  */
 export default function IntentInference() {
   const { message } = AntdApp.useApp()
@@ -61,10 +66,22 @@ export default function IntentInference() {
   const [streaming, setStreaming] = useState(false)
   const [noOption, setNoOption] = useState(false)
   const [error, setError] = useState<string | null>(null)
+  const [drawerOpen, setDrawerOpen] = useState(false)
+  const [submitting, setSubmitting] = useState(false)
   const abortRef = useRef<AbortController | null>(null)
+  /** 工单生成是独立的流：中断/重新开始时要能单独掐掉，不能和意图推断共用一个 */
+  const generationAbortRef = useRef<AbortController | null>(null)
   const scrollRef = useRef<HTMLDivElement | null>(null)
   /** 上一帧的轮次数，用来判断"是不是用户刚发了新消息"（见下面的滚动 effect） */
   const lastRoundCount = useRef(0)
+
+  const generating = draft.workOrder?.status === 'generating'
+  /**
+   * 工单已经创建：这段会话到此结束。
+   * 不能再生成第二张 —— 补充一句话会清掉上一张工单，按钮就又回来了。
+   * 想再提一单，走「重新开始」开一段新会话。
+   */
+  const submitted = draft.workOrder?.status === 'submitted'
 
   // 每次变化都落盘：中途刷新页面时，前面几轮和会话 id 都还在
   useEffect(() => {
@@ -74,7 +91,10 @@ export default function IntentInference() {
   // 离开页面时掐掉流。不掐的话它会一直读到模型把话说完，
   // 期间还在往一个已经卸载的组件写状态（React 不会报错，但请求白白挂着）
   useEffect(() => {
-    return () => abortRef.current?.abort()
+    return () => {
+      abortRef.current?.abort()
+      generationAbortRef.current?.abort()
+    }
   }, [])
 
   /**
@@ -82,6 +102,7 @@ export default function IntentInference() {
    *
    * 两种情况下必须滚：用户自己刚发了一条；以及流还在往最后那条里加字。
    * 但用户往上翻历史的时候不要把他拽回来 —— 所以只有"本来就贴着底部"才跟随。
+   * 工单气泡出现/变化时也要跟随（它不在 `rounds` 里，得单独进依赖）。
    */
   useEffect(() => {
     const el = scrollRef.current
@@ -94,7 +115,7 @@ export default function IntentInference() {
       return
     }
     el.scrollTop = el.scrollHeight
-  }, [draft.rounds, streaming, error, noOption])
+  }, [draft.rounds, draft.workOrder, streaming, error, noOption])
 
   /**
    * 改写**当前（最后一个）**轮次。流里的每个事件都落到它上面，所以收成一个函数。
@@ -124,11 +145,12 @@ export default function IntentInference() {
       setError(null)
       setNoOption(false)
       // 先放一个占位轮次：选项会一条条填进来，而上一轮的卡片就此只读。
-      // mode 先记 PENDING —— 此刻还不知道这轮会拿回选项还是追问
+      // mode 先记 PENDING —— 此刻还不知道这轮会拿回选项还是追问。
+      // 会话已经往前走，上一张工单不再对应当前描述，一并清掉。
       setDraft((prev) => ({
         ...prev,
-        // 新一轮意味着新的一组选项，上一轮选中的那条已经过期了
         selected: null,
+        workOrder: null,
         rounds: [
           ...prev.rounds,
           { input: text, mode: 'PENDING', model: '', question: '', options: [] },
@@ -147,7 +169,7 @@ export default function IntentInference() {
           userInput: text,
           signal: controller.signal,
           // 首轮的 threadId 是后端生成的，就在这个事件里 ——
-          // 它同时是下一轮和提交工单要带的会话标识
+          // 它同时是下一轮、以及生成/提交工单要带的会话标识
           onWorkflow: (threadId) => setDraft((prev) => ({ ...prev, conversationId: threadId })),
           // 模型名贴在气泡名字旁边；以后人工介入时这里记的是坐席
           onModel: (modelName) => patchActiveRound((round) => ({ ...round, model: modelName })),
@@ -174,13 +196,101 @@ export default function IntentInference() {
     [draft.conversationId, patchActiveRound],
   )
 
+  /**
+   * 生成工单。
+   *
+   * 骨架立即出现 —— 模型要几秒到十几秒，先让用户看到"这条请求已经发出去并且在干活"。
+   * 生成期间不允许再点一次（`loading` + 禁用），避免两个流同时往同一个会话里写。
+   */
+  const onGenerate = () => {
+    const selected = draft.selected
+    if (selected === null || draft.conversationId === null) {
+      return
+    }
+    const controller = new AbortController()
+    generationAbortRef.current = controller
+    const conversationId = draft.conversationId
+    const { roundIndex, option } = selected
+
+    setDraft((prev) => ({
+      ...prev,
+      workOrder: {
+        status: 'generating',
+        draft: null,
+        roundIndex,
+        optionId: option.id,
+        model: '',
+        workOrderId: null,
+        error: null,
+      },
+    }))
+
+    void generateWorkOrderDraft({
+      conversationId,
+      userSelect: option.id,
+      signal: controller.signal,
+      onModel: (model) =>
+        setDraft((prev) =>
+          prev.workOrder === null
+            ? prev
+            : { ...prev, workOrder: { ...prev.workOrder, model } },
+        ),
+      onDraft: (workOrderDraft) =>
+        setDraft((prev) =>
+          prev.workOrder === null
+            ? prev
+            : {
+                ...prev,
+                workOrder: {
+                  ...prev.workOrder,
+                  status: 'ready',
+                  draft: workOrderDraft,
+                  error: null,
+                },
+              },
+        ),
+      onError: (msg) =>
+        setDraft((prev) =>
+          prev.workOrder === null
+            ? prev
+            : {
+                ...prev,
+                workOrder: { ...prev.workOrder, status: 'failed', error: msg },
+              },
+        ),
+    }).finally(() => {
+      // 只有当前这条流有资格收尾：重新开始/再次生成时旧流的 finally 是异步落地的
+      if (generationAbortRef.current !== controller) {
+        return
+      }
+      generationAbortRef.current = null
+      // 流结束了但还是 generating（被中断、或一帧 draft 都没有）：不能把骨架留在屏幕上转
+      setDraft((prev) => {
+        if (prev.workOrder === null || prev.workOrder.status !== 'generating') {
+          return prev
+        }
+        return {
+          ...prev,
+          workOrder: {
+            ...prev.workOrder,
+            status: 'failed',
+            error: controller.signal.aborted
+              ? '已取消生成'
+              : '模型没有返回工单内容，请重新生成',
+          },
+        }
+      })
+    })
+  }
+
   /** 第一句描述和后续补充共用同一个输入框，只是数据源和按钮文案不同 */
   const isFirst = draft.rounds.length === 0
   const composerValue = isFirst ? input : supplement
   const setComposerValue = isFirst ? setInput : setSupplement
+  const busy = streaming || generating
   const onSend = () => {
     const text = composerValue.trim()
-    if (text === '' || streaming) {
+    if (text === '' || busy || submitted) {
       return
     }
     if (isFirst) {
@@ -193,11 +303,14 @@ export default function IntentInference() {
 
   const onInterrupt = () => {
     abortRef.current?.abort()
-    message.info('已中断本轮分析')
+    generationAbortRef.current?.abort()
+    message.info('已中断当前操作')
   }
 
   const onReset = () => {
     abortRef.current?.abort()
+    generationAbortRef.current?.abort()
+    setDrawerOpen(false)
     clearDraft()
     setDraft(emptyDraft())
     setError(null)
@@ -213,14 +326,74 @@ export default function IntentInference() {
       ? draft.selected.option
       : null
 
-  const onCreateWorkOrder = () => {
-    if (selectedHere === null || draft.conversationId === null) {
+  /** 抽屉里的改动回写草稿（落 sessionStorage），关掉再打开时还在 */
+  const onDraftChange = (workOrderDraft: WorkOrderDraft) => {
+    setDraft((prev) =>
+      prev.workOrder === null
+        ? prev
+        : { ...prev, workOrder: { ...prev.workOrder, draft: workOrderDraft } },
+    )
+  }
+
+  const onSubmitWorkOrder = async (values: WorkOrderFormValues) => {
+    const generation = draft.workOrder
+    if (generation === null || draft.conversationId === null) {
       return
     }
-    // 会话 id 与分析结果都留在草稿里，下一步据此预填表单
-    navigate(
-      `/ops/ai/submit?conversationId=${encodeURIComponent(draft.conversationId)}&option=${selectedHere.id}`,
-    )
+    setSubmitting(true)
+    try {
+      const created = await submitWorkOrderDraft({
+        conversationId: draft.conversationId,
+        // 用生成时记下的选项编号，而不是"当前选中"：用户可能在生成后又点了别的卡片
+        userSelect: generation.optionId,
+        title: values.title,
+        type: values.type,
+        priority: values.priority,
+        problemDescription: values.problemDescription,
+        originalProblemDescription: draftInputRounds(draft).join('\n'),
+        solutionDetail: values.solutionDetail,
+      })
+      setDraft((prev) => {
+        if (prev.workOrder === null) {
+          return prev
+        }
+        const edited =
+          prev.workOrder.draft === null
+            ? null
+            : {
+                ...prev.workOrder.draft,
+                title: values.title,
+                type: values.type,
+                priority: values.priority,
+                problemDescription: values.problemDescription,
+                solutionDetail: values.solutionDetail ?? '',
+              }
+        return {
+          ...prev,
+          workOrder: {
+            ...prev.workOrder,
+            status: 'submitted',
+            draft: edited,
+            workOrderId: created.id,
+            error: null,
+          },
+        }
+      })
+      setDrawerOpen(false)
+      message.success('工单已提交')
+    } catch (err) {
+      // 抽屉不关：用户能在同一张表上改了再交
+      message.error(err instanceof Error ? err.message : '提交失败')
+    } finally {
+      setSubmitting(false)
+    }
+  }
+
+  const onViewWorkOrder = () => {
+    const id = draft.workOrder?.workOrderId
+    if (id) {
+      navigate(`/ops/work-order?openId=${encodeURIComponent(id)}`)
+    }
   }
 
   /**
@@ -256,13 +429,18 @@ export default function IntentInference() {
         draft.selected !== null && draft.selected.roundIndex === index
           ? draft.selected.option.id
           : null,
-      // 流没结束时后面可能还有新选项，现在选中的编号随时会被打乱
-      disabled: !isActive || streaming,
-      hint: !isActive
-        ? '这是之前某一轮的选项，仅供回看'
-        : streaming
-          ? `AI 正在继续给出选项，已收到 ${round.options.length} 条…`
-          : undefined,
+      // 流没结束时后面可能还有新选项，现在选中的编号随时会被打乱；
+      // 工单已创建后整段会话只读
+      disabled: !isActive || streaming || generating || submitted,
+      hint: submitted
+        ? '工单已创建，这段会话已结束'
+        : !isActive
+          ? '这是之前某一轮的选项，仅供回看'
+          : streaming
+            ? `AI 正在继续给出选项，已收到 ${round.options.length} 条…`
+            : generating
+              ? '正在按选中的选项生成工单…'
+              : undefined,
       onSelect: (option) =>
         setDraft((prev) => ({ ...prev, selected: { roundIndex: index, option } })),
     }
@@ -329,7 +507,7 @@ export default function IntentInference() {
                 </Text>
                 <Paragraph style={{ margin: '6px 0 0' }}>
                   把遇到的问题告诉我就行：我来判断它属于哪一类工单 —— 信息够了，我会列出几种可能让你挑；
-                  还缺关键信息，我会先反问你一句。你确认之后，我再帮你把工单填好。
+                  还缺关键信息，我会先反问你一句。你确认之后，我再帮你把工单填好，你可以点开工单修改并提交。
                 </Paragraph>
               </div>
             </Flex>
@@ -383,6 +561,23 @@ export default function IntentInference() {
           )
         })}
 
+        {/* 工单不是某一轮的作答，而是整段对话的产物 —— 所以在所有轮次之后单列一条 */}
+        {draft.workOrder !== null && (
+          <ChatBubble
+            role="ai"
+            tag={draft.workOrder.model}
+            content={{
+              kind: 'workorder',
+              status: draft.workOrder.status,
+              draft: draft.workOrder.draft,
+              workOrderId: draft.workOrder.workOrderId,
+              error: draft.workOrder.error,
+              onOpen: () => setDrawerOpen(true),
+              onView: onViewWorkOrder,
+            }}
+          />
+        )}
+
         {noOption && (
           <ChatBubble
             role="ai"
@@ -403,22 +598,19 @@ export default function IntentInference() {
         )}
       </div>
 
-      {selectedHere !== null && (
-        <Auth
-          code={AI_PERMISSIONS.assistSubmit}
-          fallback={<Text type="secondary">没有「AI 辅助填单」权限，请联系管理员</Text>}
+      {/* 工单创建后不再提供生成入口：同一段会话只出一张单 */}
+      {selectedHere !== null && !submitted && (
+        <Button
+          block
+          size="large"
+          type="primary"
+          icon={<FileAddOutlined />}
+          loading={generating}
+          disabled={busy}
+          onClick={onGenerate}
         >
-          <Button
-            block
-            size="large"
-            type="primary"
-            icon={<FileAddOutlined />}
-            disabled={streaming}
-            onClick={onCreateWorkOrder}
-          >
-            用选中的选项生成工单（#{selectedHere.id} {selectedHere.title}）
-          </Button>
-        </Auth>
+          生成工单（#{selectedHere.id} {selectedHere.title}）
+        </Button>
       )}
 
       <Flex gap={8} align="flex-end">
@@ -432,16 +624,18 @@ export default function IntentInference() {
             value={composerValue}
             onChange={(event) => setComposerValue(event.target.value)}
             placeholder={
-              isFirst
-                ? '例如：财务系统导出报表时一直转圈'
-                : asking
-                  ? '回答它上面的问题，比如：昨天上午，行政楼'
-                  : '补充一些细节，比如：昨天升级之后才开始的'
+              submitted
+                ? '工单已创建，如需再次提单请点右上角「重新开始」'
+                : isFirst
+                  ? '例如：财务系统导出报表时一直转圈'
+                  : asking
+                    ? '回答它上面的问题，比如：昨天上午，行政楼'
+                    : '补充一些细节，比如：昨天升级之后才开始的'
             }
             // 单行起步，写长了自动长高（最多 6 行）
             autoSize={{ minRows: 1, maxRows: 6 }}
             maxLength={2000}
-            disabled={streaming}
+            disabled={busy || submitted}
             // 回车即发送，换行用 Shift+Enter —— 聊天框的默认手势。
             // 输入法正在组词时的回车是"选词"，不能当发送（否则中文用户每打一个词就发一次）
             onPressEnter={(event) => {
@@ -469,7 +663,7 @@ export default function IntentInference() {
         </div>
 
         <Space size={8} style={{ flexShrink: 0 }}>
-          {streaming && (
+          {busy && (
             <Button danger size="large" onClick={onInterrupt}>
               中断
             </Button>
@@ -479,13 +673,23 @@ export default function IntentInference() {
             size="large"
             icon={<SendOutlined />}
             loading={streaming}
-            disabled={composerValue.trim() === ''}
+            disabled={composerValue.trim() === '' || generating || submitted}
             onClick={onSend}
           >
             {isFirst ? '开始分析' : asking ? '提交回答' : '继续分析'}
           </Button>
         </Space>
       </Flex>
+
+      <WorkOrderDraftDrawer
+        open={drawerOpen}
+        draft={draft.workOrder?.draft ?? null}
+        originalDescription={draftInputRounds(draft).join('\n')}
+        submitting={submitting}
+        onClose={() => setDrawerOpen(false)}
+        onChange={onDraftChange}
+        onSubmit={(values) => void onSubmitWorkOrder(values)}
+      />
     </Card>
   )
 }

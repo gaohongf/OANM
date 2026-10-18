@@ -13,7 +13,7 @@
 |---|---|---|
 |Spring Cloud Alibaba|2023.0.3.4|本项目基于 Spring Cloud Alibaba|
 |Java|17|开发环境使用 Java 17，满足 Spring Boot 3.0+ 最低要求|
-|MySQL|8.x.x|数据库，各服务共用一个库 `oanm`|
+|PostgreSQL|18.x|数据库，各服务共用一个库 `oanm`|
 |Redis|6.x.x.x+|NoSQL，用作缓存，版本必须 6 以上否则 sa-token 无法正常使用|
 |Nacos|v2.3.1|服务注册、服务发现、配置中心|
 |Kafka|4.3.1+|MQ（开发环境用 Docker 镜像 `apache/kafka:latest`，broker 版本 4.3.1）|
@@ -37,7 +37,7 @@
 |api-gateway|路由|8080|—|后端服务核心路由模块，只转发 `/api/**`|
 |service-auth|授权与鉴权管理|8084|`/api/auth`|管理用户-角色-权限-路由，提供授权服务|
 |service-work-order|工单|8090|`/api/ops`|工单的创建、流转与处理|
-|service-ai|AI|8085|`/api/ai`|对接大模型，提供意图分析等能力|
+|service-ai|AI|8085|`/api/ai`|对接大模型，提供意图推断与工单生成能力|
 |service-message|消息|8093|`/api/message`|站内消息通知的基础设施（模板渲染、落库、SSE 推送）|
 
 外部请求一律先到网关，由网关按 `/api/**` 前缀转发到对应服务；服务之间调用的内部接口放在
@@ -62,7 +62,7 @@ gateway-routes.json    网关路由表的导出快照（实际数据在库里）
 
 ## 环境准备
 
-需要先准备好 MySQL、Redis、Nacos、Kafka 四样。
+需要先准备好 PostgreSQL、Redis、Nacos、Kafka 四样。
 
 Kafka 开发环境容器（Nacos、Redis 同理，此处只列 Kafka）：
 

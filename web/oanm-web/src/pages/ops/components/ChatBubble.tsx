@@ -2,8 +2,9 @@ import { Alert, Avatar, Space, Tag, Typography, theme } from 'antd'
 import type { GlobalToken } from 'antd'
 import { RobotOutlined, UserOutlined } from '@ant-design/icons'
 
-import type { IntentOption } from '../../../api/ai'
+import type { IntentOption, WorkOrderDraft } from '../../../api/ai'
 import { IntentOptionCard } from './IntentOptionCard'
+import { WorkOrderDraftCard } from './WorkOrderDraftCard'
 
 const { Text } = Typography
 
@@ -32,6 +33,16 @@ export type BubbleContent =
   | { kind: 'pending'; text: string }
   /** 需要用户注意的一条提示（解析失败、请求出错） */
   | { kind: 'notice'; level: 'warning' | 'error'; title: string; description?: string }
+  /** 生成出来的工单：骨架 → 卡片 → 已创建，同一条气泡按状态变化 */
+  | {
+      kind: 'workorder'
+      status: 'generating' | 'ready' | 'failed' | 'submitted'
+      draft: WorkOrderDraft | null
+      workOrderId: string | null
+      error: string | null
+      onOpen: () => void
+      onView: () => void
+    }
 
 interface ChatBubbleProps {
   role: 'user' | 'ai'
@@ -59,10 +70,10 @@ interface ChatBubbleProps {
 export function ChatBubble({ role, content, tag }: ChatBubbleProps) {
   const { token } = theme.useToken()
   const isUser = role === 'user'
-  // 选项是一组卡片，给它更宽的位置；对话文字保持在易读的行宽内
-  const wide = content.kind === 'options'
+  // 选项/工单是一组卡片，给它们更宽的位置；对话文字保持在易读的行宽内
+  const wide = content.kind === 'options' || content.kind === 'workorder'
   // 用户说的是一段话，永远带底色；AI 只有纯文字/正在输入才需要底色 ——
-  // 选项本身就是卡片、提示本身就是 Alert，再套一层框会变成两层边框
+  // 选项/工单本身就是卡片、提示本身就是 Alert，再套一层框会变成两层边框
   const boxed = isUser || content.kind === 'text' || content.kind === 'pending'
 
   return (
@@ -177,6 +188,18 @@ function renderContent(content: BubbleContent, token: GlobalToken) {
           showIcon
           message={content.title}
           description={content.description}
+        />
+      )
+
+    case 'workorder':
+      return (
+        <WorkOrderDraftCard
+          status={content.status}
+          draft={content.draft}
+          workOrderId={content.workOrderId}
+          error={content.error}
+          onOpen={content.onOpen}
+          onView={content.onView}
         />
       )
   }

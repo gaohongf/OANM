@@ -1,6 +1,6 @@
 -- ============================================================
 -- service-work-order 建表脚本
--- 数据库: MySQL 8.x
+-- 数据库: PostgreSQL 18
 --
 -- 说明:
 --   1. 所有表统一继承 BaseEntity, 公共字段为:
@@ -11,31 +11,29 @@
 --   (以上约定与 service-auth/db/schema.sql 一致)
 -- ============================================================
 
-SET NAMES utf8mb4;
-
 -- ------------------------------------------------------------
 -- 工单表
 --
--- 字段形状直接对齐 service-ai 那个"辅助填单"接口的输出 —— 模型每吐一行单字段
--- JSON, 就落一列。刻意保持一一对应, 中间不做任何重命名, 这样"AI 给了什么、
+-- 字段形状直接对齐 service-ai 生成的工单草稿 —— 标题、类型、优先级、描述、
+-- 解决方法一一对应。刻意保持一一对应, 中间不做任何重命名, 这样"AI 给了什么、
 -- 库里存了什么"一眼能对上, 排查时不用在脑子里做一次映射。
 -- ------------------------------------------------------------
-DROP TABLE IF EXISTS `work_orders`;
-CREATE TABLE `work_orders`
+DROP TABLE IF EXISTS work_orders CASCADE;
+CREATE TABLE work_orders
 (
-    `id`                           BIGINT        NOT NULL COMMENT '主键, 雪花ID',
-    `title`                        VARCHAR(200)  NOT NULL COMMENT '工单标题',
-    `type`                         VARCHAR(16)   NOT NULL COMMENT '工单类型: DEMAND-需求 FAULT-故障',
-    `priority`                     VARCHAR(16)   NOT NULL COMMENT '优先级: LOW/MEDIUM/HIGH/URGENT',
-    `problem_description`          VARCHAR(2000) NOT NULL COMMENT 'AI 整理后的工单描述',
+    id                           BIGINT        NOT NULL,
+    title                        VARCHAR(200)  NOT NULL,
+    type                         VARCHAR(16)   NOT NULL,
+    priority                     VARCHAR(16)   NOT NULL,
+    problem_description          VARCHAR(2000) NOT NULL,
     /*
       用户原始描述, 一行一轮。
       用户在意图推断页可以反复补充, 所以这里存的不是"一段话"而是"一串话" ——
       每补充一次就多一行, 顺序与补充顺序一致。不为此单开一张子表: 这些行没有
       各自独立的生命周期, 从不单独查询或修改, 拆表只会多一次 join。
     */
-    `original_problem_description` TEXT          NULL COMMENT '用户原始描述, 一行一轮(补充几次就有几行)',
-    `solution_detail`              TEXT          NULL COMMENT 'AI 给出的解决方法',
+    original_problem_description TEXT          NULL,
+    solution_detail              TEXT          NULL,
     /*
       AI 会话 ID, 归档指针。
 
@@ -49,21 +47,41 @@ CREATE TABLE `work_orders`
       指针就悬空了。真需要"入库即不可变"的归档时, 应该另加一列存对话正文, 而不是
       指望这张表。
     */
-    `ai_conversation_id`           VARCHAR(36)   NULL COMMENT 'AI 会话ID, 指向 spring_ai_chat_memory.conversation_id',
-    `ai_selected_option_id`        INT           NULL COMMENT '用户在意图推断里选中的选项 id',
-    `assignee_id`                  BIGINT        NULL COMMENT '受理人ID',
-    `assignee_note`                VARCHAR(1000) NULL COMMENT '受理人笔记',
-    `status`                       VARCHAR(16)   NOT NULL DEFAULT 'NEW' COMMENT '状态: NEW/ACCEPTED/RESOLVED/CLOSED',
+    ai_conversation_id           VARCHAR(36)   NULL,
+    ai_selected_option_id        INTEGER       NULL,
+    assignee_id                  BIGINT        NULL,
+    assignee_note                VARCHAR(1000) NULL,
+    status                       VARCHAR(16)   NOT NULL DEFAULT 'NEW',
 
-    `create_by`                    BIGINT        NULL COMMENT '创建人ID',
-    `create_time`                  DATETIME      NULL COMMENT '创建时间',
-    `update_by`                    BIGINT        NULL COMMENT '更新人ID',
-    `update_time`                  DATETIME      NULL COMMENT '更新时间',
-    `deleted`                      INT           NOT NULL DEFAULT 0 COMMENT '逻辑删除: 0-未删除 1-已删除',
-    `version`                      INT           NOT NULL DEFAULT 0 COMMENT '乐观锁版本号',
+    create_by                    BIGINT        NULL,
+    create_time                  TIMESTAMP     NULL,
+    update_by                    BIGINT        NULL,
+    update_time                  TIMESTAMP     NULL,
+    deleted                      INTEGER       NOT NULL DEFAULT 0,
+    version                      INTEGER       NOT NULL DEFAULT 0,
 
-    PRIMARY KEY (`id`),
-    KEY `idx_work_orders_status` (`status`),
-    KEY `idx_work_orders_conversation` (`ai_conversation_id`)
-) ENGINE = InnoDB
-  DEFAULT CHARSET = utf8mb4 COMMENT ='运维工单';
+    PRIMARY KEY (id)
+);
+
+CREATE INDEX idx_work_orders_status ON work_orders (status);
+CREATE INDEX idx_work_orders_conversation ON work_orders (ai_conversation_id);
+
+COMMENT ON TABLE work_orders IS '运维工单';
+COMMENT ON COLUMN work_orders.id IS '主键, 雪花ID';
+COMMENT ON COLUMN work_orders.title IS '工单标题';
+COMMENT ON COLUMN work_orders.type IS '工单类型: DEMAND-需求 FAULT-故障';
+COMMENT ON COLUMN work_orders.priority IS '优先级: LOW/MEDIUM/HIGH/URGENT';
+COMMENT ON COLUMN work_orders.problem_description IS 'AI 整理后的工单描述';
+COMMENT ON COLUMN work_orders.original_problem_description IS '用户原始描述, 一行一轮(补充几次就有几行)';
+COMMENT ON COLUMN work_orders.solution_detail IS 'AI 给出的解决方法';
+COMMENT ON COLUMN work_orders.ai_conversation_id IS 'AI 会话ID, 指向 spring_ai_chat_memory.conversation_id';
+COMMENT ON COLUMN work_orders.ai_selected_option_id IS '用户在意图推断里选中的选项 id';
+COMMENT ON COLUMN work_orders.assignee_id IS '受理人ID';
+COMMENT ON COLUMN work_orders.assignee_note IS '受理人笔记';
+COMMENT ON COLUMN work_orders.status IS '状态: NEW/ACCEPTED/RESOLVED/CLOSED';
+COMMENT ON COLUMN work_orders.create_by IS '创建人ID';
+COMMENT ON COLUMN work_orders.create_time IS '创建时间';
+COMMENT ON COLUMN work_orders.update_by IS '更新人ID';
+COMMENT ON COLUMN work_orders.update_time IS '更新时间';
+COMMENT ON COLUMN work_orders.deleted IS '逻辑删除: 0-未删除 1-已删除';
+COMMENT ON COLUMN work_orders.version IS '乐观锁版本号';

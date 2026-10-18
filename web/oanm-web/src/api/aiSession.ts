@@ -1,17 +1,13 @@
-import type { IntentOption } from './ai'
+import { readWorkOrderDraft } from './ai'
+import type { IntentOption, WorkOrderDraft } from './ai'
 
 /**
- * 本次提单的草稿：用户在意图推断页说过的原话、AI 给过的选项、选中的那一条。
+ * 本次提单的草稿：用户在智能提单页说过的原话、AI 给过的选项、选中的那一条，
+ * 以及最后生成出来的工单。
  *
  * ## 为什么要存
- * 两件事都靠它：
- * 1. 填单页要拿"用户真实输入"（**以本地这份为准**，理由见下）
- * 2. 刷新页面不该丢掉前面几轮的输入
- *
- * ## 为什么以本地这份为准，而不是信模型转述的 `user_input_N`
- * 用户原话我们本来就有 —— 是他自己敲进输入框的。而模型转述会改写、会丢信息。
- * 所以模型那几行只用来**补本地缺失的轮次**（刷新后 session 丢了、或者用户直接
- * 拿着链接打开填单页时才用得上）。
+ * 1. 刷新页面不该丢掉前面几轮的输入和已经生成好的工单；
+ * 2. 提交时"原始描述"要用**用户原话**（以本地这份为准，理由见 `draftInputRounds`）。
  *
  * ## 为什么是 sessionStorage 而不是 localStorage
  * 这是**一次任务的草稿**，不是用户的偏好设置。下次打开浏览器时它还留着的话，
@@ -20,9 +16,6 @@ import type { IntentOption } from './ai'
  *
  * ## 为什么只用一个槽位，而不是按 conversationId 分槽
  * 草稿属于"正在进行的那一次提单"，一个标签页里同时进行两次是没有意义的。
- * 单槽 + 把 conversationId 存在草稿内部，填单页不必先知道 id 就能读到草稿；
- * 而按 id 分槽的话，用链接直接打开（id 与草稿不匹配）就什么也读不到。
- * 两边 id 不一致时由调用方比对并决定是否采用，见 `matchesConversation`。
  */
 
 const STORAGE_KEY = 'oanm.ai.draft'
@@ -58,32 +51,58 @@ export interface IntentRound {
 }
 
 /**
- * 校验用的"宽松轮次"：本版本之前的草稿只有 `input` 和 `options`。
- *
- * 校验只针对**当时就存在**的字段，缺的 `mode`/`question` 交给 `normalizeRound` 补 ——
- * 为两个能安全取默认值的字段把整份草稿判死，代价是用户丢掉前面几轮说过的话。
+ * 最近一次工单生成的状态。它不是某一轮的作答，而是整段对话的产物 ——
+ * 所以挂在草稿上、在所有轮次之后单独渲染一条气泡。
  */
+export interface WorkOrderGeneration {
+  /**
+   * `generating` 时前端显示骨架；`ready` 显示卡片、可打开抽屉；
+   * `failed` 显示失败原因；`submitted` 显示工单号。
+   */
+  status: 'generating' | 'ready' | 'failed' | 'submitted'
+  /** 模型整理出来的工单（用户可能在抽屉里改过，改完会回写到这里） */
+  draft: WorkOrderDraft | null
+  /**
+   * 生成时选中的是哪一轮、哪一项 —— 提交归档用它，而不是"当前选中"：
+   * 用户完全可能在生成之后又去点了别的选项卡片。
+   */
+  roundIndex: number
+  optionId: number
+  /** 生成所用的模型名，气泡标签用 */
+  model: string
+  workOrderId: string | null
+  error: string | null
+}
+
 type StoredRound = Pick<IntentRound, 'input' | 'options'> &
   Partial<Pick<IntentRound, 'mode' | 'model' | 'question'>>
 
-type StoredDraft = Omit<IntentDraft, 'rounds'> & { rounds: StoredRound[] }
+/**
+ * 校验用的"宽松草稿"：旧版本没有 `workOrder` 字段，校验不该因此把整份草稿判死。
+ */
+type StoredDraft = Omit<IntentDraft, 'rounds' | 'workOrder'> & {
+  rounds: StoredRound[]
+  workOrder?: unknown
+}
 
 export interface IntentDraft {
   /** 工作流的 threadId。首轮由后端生成，在 `workflow` 事件里回来；流未开始时为 null */
   conversationId: string | null
   rounds: IntentRound[]
   selected: { roundIndex: number; option: IntentOption } | null
+  /** 最近一次工单生成；还没生成过时为 null */
+  workOrder: WorkOrderGeneration | null
 }
 
 export function emptyDraft(): IntentDraft {
-  return { conversationId: null, rounds: [], selected: null }
+  return { conversationId: null, rounds: [], selected: null, workOrder: null }
 }
 
 /**
  * 读取草稿。
  *
- * 读不到、或者形状不对（比如是旧版本写的）都返回 null —— 解析失败绝不能让
- * 填单页崩掉，最坏情况是回到"手工建单"模式，那是个可用状态。
+ * 读不到、或者形状不对（比如是旧版本写的）都返回 null —— 解析失败绝不能让页面崩掉，
+ * 最坏情况是回到空白会话，那是个可用状态。
  */
 export function loadDraft(): IntentDraft | null {
   const raw = sessionStorage.getItem(STORAGE_KEY)
@@ -95,13 +114,13 @@ export function loadDraft(): IntentDraft | null {
     if (!isDraft(parsed)) {
       return null
     }
-    // 选中的那一条单独校验、单独丢弃：填单页要拿它的 option.id 去发起 AI 填写
-    // （`selected.option.id` 是个会直接抛错的下标访问），而它坏掉的原因和轮次无关 ——
-    // 一处坏掉不该把前面几轮的输入一起废掉。
+    // 选中的那一条单独校验、单独丢弃：`selected.option.id` 是个会直接抛错的下标访问，
+    // 而它坏掉的原因和轮次无关 —— 一处坏掉不该把前面几轮的输入一起废掉。
     return {
-      ...parsed,
+      conversationId: parsed.conversationId,
       rounds: parsed.rounds.map(normalizeRound),
       selected: isSelection(parsed.selected) ? parsed.selected : null,
+      workOrder: normalizeWorkOrder(parsed.workOrder),
     }
   } catch {
     return null
@@ -130,11 +149,60 @@ function normalizeMode(value: unknown): IntentRoundMode {
   return value === 'ask' || value === 'PROBLEM' ? 'ask' : 'options'
 }
 
+/**
+ * 校验并归还工单生成状态。
+ *
+ * 刷新时正在生成的那一次必须降级成 `failed`：刷新之后没有任何流在跑，
+ * 骨架会永远转下去，而用户以为 AI 还在干活。
+ *
+ * 缺 `roundIndex` / `optionId` 的整块丢弃 —— 没有它们就没法把草稿归档到对应会话，
+ * 留着只会让提交接口收到一个没有出处的单子。
+ */
+function normalizeWorkOrder(value: unknown): WorkOrderGeneration | null {
+  if (typeof value !== 'object' || value === null) {
+    return null
+  }
+  const item = value as Record<string, unknown>
+  const status = item.status
+  if (
+    status !== 'generating' &&
+    status !== 'ready' &&
+    status !== 'failed' &&
+    status !== 'submitted'
+  ) {
+    return null
+  }
+  if (typeof item.roundIndex !== 'number' || typeof item.optionId !== 'number') {
+    return null
+  }
+
+  const draft = readWorkOrderDraft(item.draft)
+  const base = {
+    draft,
+    roundIndex: item.roundIndex,
+    optionId: item.optionId,
+    model: typeof item.model === 'string' ? item.model : '',
+    workOrderId: typeof item.workOrderId === 'string' ? item.workOrderId : null,
+    error: typeof item.error === 'string' ? item.error : null,
+  }
+
+  if (status === 'generating') {
+    return { ...base, status: 'failed', error: '页面刷新中断了这次生成，请重新生成' }
+  }
+  if (status === 'ready' && draft === null) {
+    return null
+  }
+  if (status === 'submitted' && (base.workOrderId === null || base.workOrderId === '')) {
+    return null
+  }
+  return { ...base, status }
+}
+
 export function saveDraft(draft: IntentDraft): void {
   sessionStorage.setItem(STORAGE_KEY, JSON.stringify(draft))
 }
 
-/** 提交成功后清掉，免得下次进填单页又是一张"上次的单" */
+/** 用户点「重新开始」时清掉，免得下次进来还是上一单的内容 */
 export function clearDraft(): void {
   sessionStorage.removeItem(STORAGE_KEY)
 }
@@ -143,10 +211,8 @@ export function clearDraft(): void {
  * 草稿里的用户真实输入，按轮次顺序。
  * 表单里"原始描述"那一段多行文本就是它拼出来的：一行 = 一轮。
  *
- * 轮内换行会被压成一个空格：这一段多行文本的**行号就是轮次编号**，用户在某轮输入框里
- * 敲了回车的话，那一轮就会占掉两行，后面的轮次整体错位 —— 而模型那边回传的
- * `user_input_N` 是按轮编号的，错位之后 N 会落到别人的行上，`applyLine` 按 index 补缺
- * 的那套逻辑就永远补不对。压掉换行是唯一能让"第 N 行 = 第 N 轮"成立的做法，
+ * 轮内换行会被压成一个空格：这一段多行文本的**行号就是轮次编号**，
+ * 用户在某轮输入框里敲了回车的话，那一轮就会占掉两行，后面的轮次整体错位。
  * 措辞一个字没动。
  */
 export function draftInputRounds(draft: IntentDraft | null): string[] {
@@ -154,14 +220,6 @@ export function draftInputRounds(draft: IntentDraft | null): string[] {
     return []
   }
   return draft.rounds.map((round) => round.input.replace(/[\r\n]+/g, ' '))
-}
-
-/** 草稿是不是属于这个会话。用链接直接打开填单页时靠它判断能不能沿用草稿。 */
-export function matchesConversation(draft: IntentDraft | null, conversationId: string | null): boolean {
-  if (!draft || conversationId === null) {
-    return false
-  }
-  return draft.conversationId === conversationId
 }
 
 /**

@@ -1,24 +1,34 @@
+import { request } from './http'
 import { openSse } from './sse'
-import { normalizePriority, normalizeType } from './workOrder'
-import type { WorkOrderPriority, WorkOrderType } from './workOrder'
 
 /**
- * service-ai 的两个 SSE 接口：意图推断与辅助填单。
+ * service-ai 的两步：意图推断与工单生成。
  *
- * ## 这里的核心是"容错解析"，不是 HTTP
+ * 两步走同一个 SSE 端点（`/api/ai/assistant/wo/uiii`）：生成就是这段对话的下一轮，
+ * 客户端带上同一个会话 id 和一个选项编号继续即可。提交建单是普通 JSON 接口，
+ * 由后端代用户转发给工单服务。
+ *
+ * ## 意图推断仍是"容错解析"
  * 模型被要求只输出 JSONL，但它不保证守规矩：可能包一层 ```json 围栏、
  * 可能在某行后面多写一句解释、可能把该给英文枚举的地方写成中文。
  * 所以每一行都是**独立**解析的：一行坏掉只丢一行，页面继续渲染剩下的。
- * 这也正是"逐条渲染卡片"能成立的前提 —— 每解析出一条就立刻交给调用方。
+ *
+ * ## 工单生成不再逐行
+ * 它一次返回一个完整的 `draft` 对象（后端 `.entity()` 结构化输出），
+ * 前端只在气泡里先放骨架、拿到对象后整体渲染。
  */
 
 export const INTENT_INFERENCE_PATH = '/api/ai/assistant/wo/uiii'
-export const ASSIST_SUBMIT_PATH = '/api/ai/assistant/wo/assist-submit'
+export const WORK_ORDER_SUBMIT_PATH = '/api/ai/assistant/wo/submit'
 
-/** 权限键。与后端 `permissions.permission_key` 逐字一致，用于 `<Auth code>`。 */
+/**
+ * 权限键。与后端 `permissions.permission_key` 逐字一致，用于 `<Auth code>`。
+ *
+ * 没有提交接口的键：它是 `@LoginOnly`，真正的门禁是工单服务的
+ * `POST:/api/ops/work_order`。
+ */
 export const AI_PERMISSIONS = {
   intentInference: 'GET:/api/ai/assistant/wo/uiii',
-  assistSubmit: 'GET:/api/ai/assistant/wo/assist-submit',
 } as const
 
 // ---- 意图推断 ----
@@ -83,79 +93,46 @@ function parseOptionData(data: unknown): IntentOption | null {
   return typeof data === 'string' ? parseIntentOption(data) : readOption(data)
 }
 
-// ---- 辅助填单 ----
+// ---- 工单草稿 ----
 
 /**
- * 一行输出对应的"往表单里填什么"。
+ * 模型整理出来的一张工单。
  *
- * 做成判别联合而不是让调用方自己摸字段名，是因为**字段名是模型给的、不是我们能定的**：
- * `content` 要映射到 `problemDescription`、`solution_detail` 要映射到 `solutionDetail`、
- * `user_input_N` 要拆出轮次。把这层映射收在一个地方，页面里就只剩一个 switch。
+ * `type` / `priority` 保留模型给的**原始字符串**：提示词约束了取值，但模型仍可能
+ * 回中文或大小写不一。展示与预填时再用 `normalizeType` / `normalizePriority` 归一化 ——
+ * 归一化失败时界面如实显示原值、下拉框留空让用户自己选，而不是把整张单判死。
  */
-export type AssistLine =
-  | { kind: 'field'; field: 'title' | 'problemDescription' | 'solutionDetail'; value: string }
-  | { kind: 'type'; value: WorkOrderType }
-  | { kind: 'priority'; value: WorkOrderPriority }
-  | { kind: 'userChoose'; value: number }
-  /** `user_input_N`：用户第 N 轮的原话 */
-  | { kind: 'round'; index: number; value: string }
-  /**
-   * 值是模型编的，归一化不了（比如优先级给了个 `"P2"`）。
-   * 只对 type/priority 产生 —— 它们对应表单里的下拉框，值非法时框会是空的，
-   * 得让用户知道为什么。其它未知字段**直接忽略**：模型多给一个字段是无害的，
-   * 为它弹个警告只是噪音。
-   */
-  | { kind: 'unrecognized'; key: string; raw: string }
-
-const ROUND_KEY = /^user_input_(\d+)$/
+export interface WorkOrderDraft {
+  title: string
+  type: string
+  priority: string
+  problemDescription: string
+  solutionDetail: string
+}
 
 /**
- * 把一行文本解析成一条填单指令。
+ * 从 `draft` 帧的数据里读出草稿。
  *
- * @returns 空行、围栏、散文、以及不认识的字段都返回 null
+ * `title` 与 `problemDescription` 是提交的必填项，缺任意一个就不算生成成功 ——
+ * 让用户打开一张只有类型和优先级的表单，不如直接告诉他这次没生成出来、再点一次。
+ * 其余字段缺了只是表单里空着。
  */
-export function parseAssistLine(line: string): AssistLine | null {
-  const parsed = parseJsonLine(line)
-  if (!parsed) {
+export function readWorkOrderDraft(value: unknown): WorkOrderDraft | null {
+  if (typeof value !== 'object' || value === null) {
     return null
   }
-  // 一行只有一个字段，这是提示词约定的形状
-  const key = Object.keys(parsed)[0]
-  if (key === undefined) {
+  const parsed = value as Record<string, unknown>
+  const title = (toText(parsed.title) ?? '').trim()
+  const problemDescription = (toText(parsed.problemDescription) ?? '').trim()
+  if (title === '' || problemDescription === '') {
     return null
   }
-  const raw = parsed[key]
-  const text = toText(raw)
-  const round = ROUND_KEY.exec(key)
-
-  if (round) {
-    // 一个 user_input_N 就是一轮 = 表单里的一行。模型要是把用户的换行转义进了值里，
-    // 那一轮会占掉两行、后面的轮次整体错位（"第几行"就是"第几轮"）。
-    // 压成空格，措辞不动 —— 和 aiSession.draftInputRounds 对本地那份输入做的事一样。
-    return { kind: 'round', index: Number(round[1]), value: (text ?? '').replace(/[\r\n]+/g, ' ') }
-  }
-
-  switch (key) {
-    case 'title':
-      return text === null ? null : { kind: 'field', field: 'title', value: text }
-    case 'content':
-      return text === null ? null : { kind: 'field', field: 'problemDescription', value: text }
-    case 'solution_detail':
-      return text === null ? null : { kind: 'field', field: 'solutionDetail', value: text }
-    case 'type': {
-      const value = normalizeType(text)
-      return value ? { kind: 'type', value } : { kind: 'unrecognized', key, raw: text ?? '' }
-    }
-    case 'priority': {
-      const value = normalizePriority(text)
-      return value ? { kind: 'priority', value } : { kind: 'unrecognized', key, raw: text ?? '' }
-    }
-    case 'user_choose': {
-      const value = toNumber(raw)
-      return value === null ? null : { kind: 'userChoose', value }
-    }
-    default:
-      return null
+  return {
+    title,
+    type: toText(parsed.type) ?? '',
+    priority: toText(parsed.priority) ?? '',
+    problemDescription,
+    solutionDetail: toText(parsed.solutionDetail) ?? '',
   }
 }
 
@@ -168,7 +145,7 @@ export interface IntentStreamOptions {
   signal?: AbortSignal
   /**
    * 本轮工作流的 threadId，首轮由后端生成。
-   * 它就是要带回去的会话标识：下一轮、以及提交工单都得用它。
+   * 它就是要带回去的会话标识：下一轮、以及生成/提交工单都得用它。
    */
   onWorkflow?: (threadId: string) => void
   /**
@@ -209,7 +186,6 @@ export function startIntentInference(options: IntentStreamOptions): Promise<void
       userInput: options.userInput,
     },
     signal: options.signal,
-    // 两个字段名是历史差异（意图推断发 modelName，辅助填单发 model），取先有的那个
     onStart: (payload) => {
       const modelName = payload.modelName ?? payload.model
       if (modelName !== undefined && modelName !== '') {
@@ -242,34 +218,76 @@ export function startIntentInference(options: IntentStreamOptions): Promise<void
   })
 }
 
-export interface AssistStreamOptions {
+export interface DraftStreamOptions {
+  /** 生成必须发生在已有会话上：后端要从那个 threadId 的中断点恢复 */
   conversationId: string
   /** 用户在意图推断页选中的选项编号 */
   userSelect: number
   signal?: AbortSignal
-  onLine: (line: AssistLine) => void
-  onRawLine?: (line: string) => void
+  onModel?: (modelName: string) => void
+  /** 生成成功时回调一次，拿到的是完整草稿 */
+  onDraft: (draft: WorkOrderDraft) => void
   onDone?: () => void
+  /** 失败一律走这里，Promise 不会 reject */
   onError: (message: string) => void
 }
 
-export function startAssistSubmit(options: AssistStreamOptions): Promise<void> {
-  return openSse(ASSIST_SUBMIT_PATH, {
+/**
+ * 让模型把选中的意图整理成一张工单。
+ *
+ * 同一个端点、同一段会话，只是这次带的是 `userSelect` 而不是 `userInput`。
+ * 输出仍是 SSE（这样错误、模型名、结束原因跟意图推断走同一套协议），
+ * 但业务数据只有一帧 `chat { n: "draft", d: {...} }`。
+ */
+export function generateWorkOrderDraft(options: DraftStreamOptions): Promise<void> {
+  return openSse(INTENT_INFERENCE_PATH, {
     query: {
       id: options.conversationId,
       userSelect: options.userSelect,
     },
     signal: options.signal,
-    onDelta: (line) => {
-      options.onRawLine?.(line)
-      const parsed = parseAssistLine(line)
-      if (parsed) {
-        options.onLine(parsed)
+    onStart: (payload) => {
+      const modelName = payload.modelName ?? payload.model
+      if (modelName !== undefined && modelName !== '') {
+        options.onModel?.(modelName)
+      }
+    },
+    onChat: (frame) => {
+      if (frame.n !== 'draft') {
+        return
+      }
+      const draft = readWorkOrderDraft(frame.d)
+      if (draft) {
+        options.onDraft(draft)
       }
     },
     onDone: () => options.onDone?.(),
     onError: options.onError,
   })
+}
+
+// ---- 提交 ----
+
+export interface SubmitDraftPayload {
+  conversationId: string
+  userSelect: number
+  title: string
+  type: string
+  priority: string
+  problemDescription: string
+  /** 用户原话，一行一轮 */
+  originalProblemDescription?: string
+  solutionDetail?: string
+}
+
+/**
+ * 提交建单。
+ *
+ * 请求发给 service-ai，由它带着当前用户的 `satoken` 转发给工单服务 ——
+ * 权限校验、`createBy` 审计、建单通知仍在工单服务那一条既有路径上。
+ */
+export function submitWorkOrderDraft(payload: SubmitDraftPayload): Promise<{ id: string }> {
+  return request<{ id: string }>(WORK_ORDER_SUBMIT_PATH, { method: 'POST', body: payload })
 }
 
 // ---- 逐行解析的公共部分 ----
@@ -312,7 +330,7 @@ function parseJsonLine(line: string): Record<string, unknown> | null {
     }
     return parsed as Record<string, unknown>
   } catch {
-    // 真解析不了就放弃这一行，调用方会把它留在"原始输出"里
+    // 真解析不了就放弃这一行，就当它没出现过
     return null
   }
 }
