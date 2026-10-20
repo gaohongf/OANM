@@ -1,0 +1,57 @@
+server:
+  port: 8099
+  # port: 8082
+spring:
+  config:
+    import:
+      # 必须项：导入 Nacos 配置（optional: 前缀表示配置非必需，缺失时不报错）
+      # common 把 mybatis-plus 和 PostgreSQL 驱动带给了所有服务, DataSourceAutoConfiguration
+      # 因此会激活 —— 不导入 datasource-config 就会启动失败:
+      # "'url' attribute is not specified and no embedded datasource"。
+      # file_detail 表的上传记录就落在这个数据源里。
+      - optional:nacos:datasource-config-${spring.profiles.active}?group=DEFAULT_GROUP
+      - optional:nacos:common-config-${spring.profiles.active}?group=DEFAULT_GROUP
+      - optional:nacos:${spring.application.name}?group=DEFAULT_GROUP
+      - optional:nacos:${spring.application.name}-${spring.profiles.active}?group=DEFAULT_GROUP
+
+  application:
+    name: service-files
+  profiles:
+    active: dev
+  # 默认上限是单文件 1MB / 单请求 10MB, 连一张截图都传不上去。
+  # 这两个值只限制请求体大小, 不涉及业务判断。
+  servlet:
+    multipart:
+      max-file-size: 50MB
+      max-request-size: 60MB
+  cloud:
+    nacos:
+      discovery:
+        server-addr: 127.0.0.1:8848
+      config:
+        server-addr: 127.0.0.1:8848
+        file-extension: yaml
+        namespace: ${NACOS_NAMESPACE:}
+    # @User 的解析发生在 JSON 序列化过程中 —— 那时响应体已经开始写出, 没法再抛异常兜底。
+    # 所以回源调用必须快速失败, 不能让它把整个响应拖住。
+    # 默认的 60s readTimeout 会让 service-auth 抖一下就把所有响应卡死。
+    openfeign:
+      client:
+        config:
+          default:
+            connectTimeout: 500
+            readTimeout: 800
+
+
+
+
+dromara:
+  x-file-storage:
+    # 存储平台本身（local-plus 列表、domain、storage-path 等）在 Nacos 的
+    # service-files-dev 里配置。这里只留一个本地兜底值, 因为 Nacos 那边没有配
+    # default-platform 时, 库会退回它自己的默认值 "local", 而本项目根本没有
+    # 叫 local 的平台 —— 上传会直接报"没有找到对应的存储平台"。
+    #
+    # 不要在本地再抄一份 local-plus 列表: 属性源是按"单个键"合并的, Nacos 里删掉的
+    # 某个键（例如 base-path）不会被本地副本覆盖, 反而会继续生效。
+    default-platform: local-plus-1

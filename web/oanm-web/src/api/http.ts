@@ -60,6 +60,8 @@ interface RequestOptions {
   body?: unknown
   /** 附加查询参数；值为 undefined 的项会被跳过 */
   query?: Record<string, string | number | undefined>
+  /** 放弃这次请求（比如离开页面）。上传大文件时尤其需要 */
+  signal?: AbortSignal
 }
 
 /**
@@ -75,16 +77,28 @@ export async function request<T>(path: string, options: RequestOptions = {}): Pr
   if (token) {
     headers[TOKEN_HEADER] = token
   }
-  if (options.body !== undefined) {
+  // FormData 必须原样交给 fetch：Content-Type 要由浏览器自己生成（带 boundary），
+  // 手写成 application/json 会让后端直接按 JSON 解析失败。其余请求仍是 JSON。
+  const isFormData = options.body instanceof FormData
+  if (options.body !== undefined && !isFormData) {
     headers['Content-Type'] = 'application/json'
   }
+  // 拆成单独的变量而不是在 fetch 调用里写三元：TypeScript 不能把
+  // 提前算好的 isFormData 布尔量反向收窄 options.body 的类型。
+  const body: BodyInit | undefined =
+    options.body instanceof FormData
+      ? options.body
+      : options.body === undefined
+        ? undefined
+        : JSON.stringify(options.body)
 
   let response: Response
   try {
     response = await fetch(url, {
       method: options.method ?? 'GET',
       headers,
-      body: options.body === undefined ? undefined : JSON.stringify(options.body),
+      signal: options.signal,
+      body,
     })
   } catch {
     // fetch 只在网络层失败时 reject（断网、DNS、连接被拒）。业务错误不会走到这里。

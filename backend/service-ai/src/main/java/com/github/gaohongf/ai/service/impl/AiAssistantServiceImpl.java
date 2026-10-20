@@ -1,5 +1,8 @@
 package com.github.gaohongf.ai.service.impl;
 
+import java.util.ArrayList;
+import java.util.List;
+
 import org.springframework.ai.model.openai.autoconfigure.OpenAiChatProperties;
 import org.springframework.http.codec.ServerSentEvent;
 import org.springframework.stereotype.Service;
@@ -24,16 +27,65 @@ import reactor.core.publisher.Mono;
 @Service
 public class AiAssistantServiceImpl implements AiAssistantService {
 
+    /** 与前端的上限一致。服务端仍然要挡, 不能只靠界面禁用。 */
+    private static final int MAX_IMAGES = 3;
+
+    /** 相对地址（/file/yyyy/MM/dd/xxx.jpg）远小于这个长度, 这里只防异常长的 query。 */
+    private static final int MAX_IMAGE_URL_LENGTH = 512;
+
     private final OpenAiChatProperties openAiChatProperties;
     private final WorkOrderWorkflowLauncher workOrderWorkflowLauncher;
     private final WorkOrderClient workOrderClient;
 
     @Override
-    public Flux<ServerSentEvent<String>> workOrderUserInputIntentInference(String id, String userInput) {
+    public Flux<ServerSentEvent<String>> workOrderUserInputIntentInference(
+            String id, String userInput, List<String> images) {
         if (!StringUtils.hasText(userInput)) {
             return errorFrame(new RequestException("用户输入不可为空"));
         }
-        return intentStream(workOrderWorkflowLauncher.stream(id, userInput));
+        List<String> imageUrls;
+        try {
+            imageUrls = normalizeImages(images);
+        } catch (RequestException ex) {
+            return errorFrame(ex);
+        }
+        return intentStream(workOrderWorkflowLauncher.stream(id, userInput, imageUrls));
+    }
+
+    /**
+     * 校验并归一化图片地址。
+     *
+     * <p>
+     * 只接受上传接口返回的相对地址（{@code /file/...}）：这些值会被 service-ai 拿去
+     * 向 service-files 取字节，放任意字符串（尤其是绝对地址）进去等于给自己留了一个
+     * SSRF 入口。空列表是正常情况（本轮没附图），不报错。
+     */
+    private static List<String> normalizeImages(List<String> images) {
+        if (images == null || images.isEmpty()) {
+            return new ArrayList<>();
+        }
+        if (images.size() > MAX_IMAGES) {
+            throw new RequestException("最多只能附带 " + MAX_IMAGES + " 张图片");
+        }
+        List<String> normalized = new ArrayList<>(images.size());
+        for (String image : images) {
+            if (!StringUtils.hasText(image)) {
+                throw new RequestException("图片地址不可为空");
+            }
+            String url = image.trim();
+            if (url.length() > MAX_IMAGE_URL_LENGTH) {
+                throw new RequestException("图片地址过长");
+            }
+            // 只认本服务的相对路径。绝对地址一律拒绝：FileClient 用 baseUrl + 该路径
+            // 发请求, 放行 http(s) 就等于允许调用方指定任意内网目标。
+            if (!url.startsWith("/file/") || url.contains("..")) {
+                throw new RequestException("图片地址不合法");
+            }
+            normalized.add(url);
+        }
+        // 返回可变的 ArrayList：它会被写进工作流状态并随 checkpoint 落 Redis。
+        // List.of()/List.copyOf() 的不可变实现属于 JDK 内部类，交给序列化器是没必要的风险。
+        return normalized;
     }
 
     @Override

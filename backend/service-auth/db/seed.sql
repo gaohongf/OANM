@@ -209,9 +209,9 @@ WHERE permission_key = 'GET:/api/ai/assistant/wo/assist-submit';
 --     路由管理界面手工建的(雪花 id), 而这里是保留负 id。判重键选错的话,
 --     同一条前缀会出现两行, 网关拿到两条同序路由 —— 表现是随机的 404。
 --
---     route_order 沿用现有库里的取值(ops 10 / ai 11 / auth 21): 数值越小越优先,
---     彼此不重叠, 所以顺序只影响日志可读性, 但保持一致能避免"种子装的和我现在跑的
---     不一样"这种难查的差异。
+--     route_order 沿用现有库里的取值(ops 10 / ai 11 / message 12 / files 13-14 / auth 21):
+--     数值越小越优先, 彼此不重叠, 所以顺序只影响日志可读性, 但保持一致能避免
+--     "种子装的和我现在跑的"这种难查的差异。
 INSERT INTO api_routes (id, name, path_pattern, uri, route_order, enabled, locked, source, create_time, update_time, deleted, version)
 SELECT -40, 'Work Order Service', '/api/ops/**', 'lb://service-work-order', 10, TRUE, FALSE, 'MANUAL', NOW(), NOW(), 0, 0
 WHERE NOT EXISTS (SELECT 1 FROM api_routes WHERE path_pattern = '/api/ops/**');
@@ -219,6 +219,18 @@ WHERE NOT EXISTS (SELECT 1 FROM api_routes WHERE path_pattern = '/api/ops/**');
 INSERT INTO api_routes (id, name, path_pattern, uri, route_order, enabled, locked, source, create_time, update_time, deleted, version)
 SELECT -41, 'AI Service', '/api/ai/**', 'lb://service-ai', 11, TRUE, FALSE, 'MANUAL', NOW(), NOW(), 0, 0
 WHERE NOT EXISTS (SELECT 1 FROM api_routes WHERE path_pattern = '/api/ai/**');
+
+-- 文件访问不走 /api 前缀: 存储平台配置的 domain 是 /file/, 访问地址由 service-files
+-- 通过静态资源映射直接返回, 网关只负责按前缀转发。路径原样透传, 不做 StripPrefix。
+INSERT INTO api_routes (id, name, path_pattern, uri, route_order, enabled, locked, source, create_time, update_time, deleted, version)
+SELECT -44, 'File Service', '/file/**', 'lb://service-files', 13, TRUE, FALSE, 'MANUAL', NOW(), NOW(), 0, 0
+WHERE NOT EXISTS (SELECT 1 FROM api_routes WHERE path_pattern = '/file/**');
+
+-- 上传/删除是业务接口, 和上面的读取路由不是一回事: 前者带 /api 前缀、走 controller。
+-- 两条路由都原样透传路径, 不做 StripPrefix。
+INSERT INTO api_routes (id, name, path_pattern, uri, route_order, enabled, locked, source, create_time, update_time, deleted, version)
+SELECT -45, 'File Service API', '/api/files/**', 'lb://service-files', 14, TRUE, FALSE, 'MANUAL', NOW(), NOW(), 0, 0
+WHERE NOT EXISTS (SELECT 1 FROM api_routes WHERE path_pattern = '/api/files/**');
 
 INSERT INTO api_routes (id, name, path_pattern, uri, route_order, enabled, locked, source, create_time, update_time, deleted, version)
 SELECT -42, 'Auth Service', '/api/auth/**', 'lb://service-auth', 21, TRUE, FALSE, 'MANUAL', NOW(), NOW(), 0, 0

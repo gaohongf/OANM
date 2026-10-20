@@ -29,15 +29,25 @@ public class AskNode implements AsyncNodeAction {
                 你在当前节点的任务是:
                 1. 用日常说话的语气把缺的那一样问清楚，可以顺带给一两个例子帮用户回答。
                    （时间如"昨天上午"，地点如"行政楼行政办公室"）。
-                2. 不要输出编号、不要列清单、不要把用户说过的话复述一遍 —— 用户要看到的只是一句问话。
-                3. 一次只问缺的那一样；两样都缺就在同一句话里一起问，不要拆成两轮。
-                4. 如果缺少多样信息，询问和举例时要自然的组合进问题语句中，避免生硬和机械式对话。
-                5. 已经答过的那样不要再问，用户这一轮补上的信息要认账。
-                6. 提问要根据之前的已有信息自然追问，曾经举过例子了就不需要再举了。
-                7. 你当前节点无需结构化输出。
+                2. 如果用户语气低落、急切，可以给予一定情绪价值与安慰，不允许用生硬和带有阴阳怪气的语气，但不要偏离主题。
+                3. 不要输出编号、不要列清单、不要把用户说过的话复述一遍 —— 用户要看到的只是一句问话。
+                4. 一次只问缺的那一样；两样都缺就在同一句话里一起问，不要拆成两轮。
+                5. 如果缺少多样信息，询问和举例时要自然的组合进问题语句中，避免生硬和机械式对话。
+                6. 已经答过的那样不要再问，用户这一轮补上的信息要认账。
+                7. 提问要根据之前的已有信息自然追问，曾经举过例子了就不需要再举了。
+                8. 你当前节点无需结构化输出。
+                9. 如果下面给出了图片内容描述（非空），说明用户这一轮发了图片。可以自然地提到
+                   "我看到了你发的图片"，并依据图里与故障相关的信息（报错文字、界面状态、设备等）
+                   追问缺失的内容。但不要逐字复述图片描述，也不要把图里的文字、代码、表格整段
+                   转述出来 —— 用户要的是一句追问，不是一份识图报告。如果图片是无关运维的内容就忽略掉。
+                   图片描述为空时，不要凭空提到图片。
+                10. 如果用户的输入与运维工作无关，则提醒用户，并将对话引向运维相关内容。
 
                 缺少的关键信息如下:
                 {missing}
+
+                这一轮图片的内容描述（没有图片时为空）:
+                {vision}
                 """;
     }
 
@@ -46,12 +56,19 @@ public class AskNode implements AsyncNodeAction {
         return AsyncNodeAction.node_async((s) -> {
             Map<String, Object> map = new HashMap<>();
             String conversationId = s.value("conversationId", String.class).orElse(null);
+            // 本轮识图结果。没有图片时为空串（每轮开始时由工作流入口清空）
+            String vision = s.value("vision_res", String.class).orElse("");
+            System.out.println("================{ask}================");
+
             Flux<String> content = chatClient.prompt().system(systemPrompt).user(PromptTemplate
                     .builder()
                     .template(userPrompt)
-                    .variables(Map.of("missing", s.value("missing", List.class)
-                            .map(miss -> miss.stream().reduce((a, b) -> a + "\n" + b).orElse("").toString())
-                            .get()))
+                    .variables(Map.of(
+                            "missing", s.value("missing", List.class)
+                                    .map(miss -> miss.stream()
+                                            .reduce((a, b) -> a + "\n" + b).orElse("").toString())
+                                    .get(),
+                            "vision", vision))
                     .build()
                     .render())
                     .advisors(a -> a.param(ChatMemory.CONVERSATION_ID, conversationId))

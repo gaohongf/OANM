@@ -1,8 +1,9 @@
-import { Alert, Avatar, Space, Tag, Typography, theme } from 'antd'
+import { Alert, Avatar, Image, Space, Tag, Typography, theme } from 'antd'
 import type { GlobalToken } from 'antd'
 import { RobotOutlined, UserOutlined } from '@ant-design/icons'
 
 import type { IntentOption, WorkOrderDraft } from '../../../api/ai'
+import type { UploadedFile } from '../../../api/files'
 import { IntentOptionCard } from './IntentOptionCard'
 import { WorkOrderDraftCard } from './WorkOrderDraftCard'
 
@@ -15,8 +16,12 @@ const { Text } = Typography
  * 在下面的 switch 里加一个 case 即可 —— 调用方和布局都不用动。
  */
 export type BubbleContent =
-  /** 纯文字。用户自己说的话、AI 的追问都用它 */
-  | { kind: 'text'; text: string }
+  /**
+   * 纯文字。用户自己说的话、AI 的追问都用它。
+   * 用户的话可以带图片附件，缩略图排在文字下方 —— 两者属于同一条消息，
+   * 拆成两个气泡反而会让人以为图片是另一轮发的。
+   */
+  | { kind: 'text'; text: string; attachments?: UploadedFile[] }
   /** 一组意图选项卡片 */
   | {
       kind: 'options'
@@ -145,7 +150,39 @@ function renderContent(content: BubbleContent, token: GlobalToken) {
     case 'text':
       // 这里不用 Typography.Text：它自带文字色，会把用户气泡的浅色文字盖回深色
       return (
-        <div style={{ whiteSpace: 'pre-wrap', wordBreak: 'break-word' }}>{content.text}</div>
+        <div
+          style={{
+            display: 'flex',
+            flexDirection: 'column',
+            gap: content.attachments?.length ? 8 : 0,
+          }}
+        >
+          {content.text !== '' && (
+            <div style={{ whiteSpace: 'pre-wrap', wordBreak: 'break-word' }}>{content.text}</div>
+          )}
+          {content.attachments !== undefined && content.attachments.length > 0 && (
+            <Image.PreviewGroup>
+              <Space size={6} wrap>
+                {content.attachments.map((attachment) => (
+                  <Image
+                    // id 是库里的 UUID；兜底用 url，保证旧草稿里缺 id 也能正常渲染
+                    key={attachment.id || attachment.url}
+                    src={attachment.url}
+                    alt={attachment.originalFilename}
+                    width={72}
+                    height={72}
+                    style={{
+                      objectFit: 'cover',
+                      borderRadius: token.borderRadius,
+                      // 用户气泡是主题色底，用半透明白描边在浅色/深色主题下都能看轮廓
+                      border: '1px solid rgba(255, 255, 255, 0.35)',
+                    }}
+                  />
+                ))}
+              </Space>
+            </Image.PreviewGroup>
+          )}
+        </div>
       )
 
     case 'options':

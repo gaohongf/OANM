@@ -1,5 +1,7 @@
 package com.github.gaohongf.ai.service;
 
+import java.util.List;
+
 import org.springframework.http.codec.ServerSentEvent;
 
 import com.github.gaohongf.ai.client.WorkOrderCreated;
@@ -15,8 +17,11 @@ public interface AiAssistantService {
      *
      * <p>
      * {@code id} 为空表示新会话；带上之前的 id 表示在同一段对话里继续补充。
+     *
+     * @param images 本轮用户附带的图片访问地址（相对路径），可为空。
+     *               当前只写入工作流状态，供下一步的识图节点读取，本轮的模型调用不消费它们。
      */
-    Flux<ServerSentEvent<String>> workOrderUserInputIntentInference(String id, String userInput);
+    Flux<ServerSentEvent<String>> workOrderUserInputIntentInference(String id, String userInput, List<String> images);
 
     /**
      * 用户选中某个意图后，把整段对话整理成一张工单草稿。

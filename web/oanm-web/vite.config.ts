@@ -25,6 +25,12 @@ export default defineConfig({
         target: 'http://localhost:8080',
         changeOrigin: true,
       },
+      // 文件访问地址（/file/...）同样走网关: 上传返回的是相对路径，
+      // 不代理的话开发期缩略图会 404，而生产环境由网关同源处理。
+      '/file': {
+        target: 'http://localhost:8080',
+        changeOrigin: true,
+      },
     },
   },
 })

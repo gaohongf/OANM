@@ -38,8 +38,12 @@ export const AI_PERMISSIONS = {
  *
  * - `ask`：缺时间/地点，这一轮只反问一句（`d` 是 token 片段）
  * - `options`：信息齐了，这一轮给选项（`d` 是一个选项对象）
+ * - `refused`：输入与运维无关，这一轮被护栏拦下，只输出一句拒绝说明
+ *
+ * 识图（`vision` / `again_vision`）不在协议里：识图结果留在后端，只用于
+ * 生成追问和提取工单信息，不作为 SSE 帧下发。
  */
-export type IntentNode = 'ask' | 'options'
+export type IntentNode = 'ask' | 'options' | 'refused'
 
 export interface IntentOption {
   id: number
@@ -142,6 +146,12 @@ export interface IntentStreamOptions {
   /** 首轮不传；用户补充时传上一轮 `workflow` 事件给的 threadId */
   conversationId?: string | null
   userInput: string
+  /**
+   * 本轮附带的图片访问地址（`uploadFile` 返回的相对地址）。
+   * 后端据此读取图片字节交给模型识图；识图结果留在后端，只体现为后续的追问/选项。
+   * 超过 3 张后端会直接拒绝。
+   */
+  images?: string[]
   signal?: AbortSignal
   /**
    * 本轮工作流的 threadId，首轮由后端生成。
@@ -163,6 +173,11 @@ export interface IntentStreamOptions {
    * 拼接收在这一层，调用方直接 setState 即可。
    */
   onQuestion?: (text: string) => void
+  /**
+   * 护栏拦下本轮输入时的拒绝说明，同样是拼好的整段文字。
+   * `ended === true` 表示违规次数超限、会话已被主动结束 —— 调用方应当禁止继续输入。
+   */
+  onGuardrail?: (text: string, ended: boolean) => void
   /** 每解析出一个选项就回调一次 —— 卡片就是这样一条条出现的 */
   onOption: (option: IntentOption) => void
   onDone?: () => void
@@ -178,12 +193,17 @@ export function startIntentInference(options: IntentStreamOptions): Promise<void
   let node: IntentNode | null = null
   /** `ask` 路的累积文本。攒够了整段再往外给，页面不用自己拼 token */
   let question = ''
+  /** 护栏拒绝说明的累积文本 */
+  let refusal = ''
 
   return openSse(INTENT_INFERENCE_PATH, {
     query: {
       // 首轮必须不带 id（后端会生成一个），而不是传空串 —— 空串会被当成一个真的会话 id
       id: options.conversationId ?? undefined,
       userInput: options.userInput,
+      // 用逗号拼成一个参数：后端 @RequestParam List<String> 会自动按逗号拆分。
+      // 图片地址是 /file/yyyy/MM/dd/<uuid>.jpg，本身不含逗号。
+      images: options.images?.length ? options.images.join(',') : undefined,
     },
     signal: options.signal,
     onStart: (payload) => {
@@ -194,6 +214,16 @@ export function startIntentInference(options: IntentStreamOptions): Promise<void
     },
     onWorkflow: (threadId) => options.onWorkflow?.(threadId),
     onChat: (frame) => {
+      // 护栏拦下输入：这一轮没有别的节点会跑，它就是本轮的"作答"
+      if (frame.n === 'guardrail_reject' || frame.n === 'guardrail_end') {
+        if (node === null) {
+          node = 'refused'
+          options.onMode?.(node)
+        }
+        refusal += toText(frame.d) ?? ''
+        options.onGuardrail?.(refusal, frame.n === 'guardrail_end')
+        return
+      }
       // 不认识节点名就安静跳过：以后工作流加节点，老前端应当少显示而不是报错
       if (frame.n !== 'ask' && frame.n !== 'options') {
         return

@@ -1,12 +1,35 @@
 import { Fragment, useCallback, useEffect, useRef, useState } from 'react'
-import { App as AntdApp, Avatar, Button, Card, Flex, Input, Space, Typography, theme } from 'antd'
-import { FileAddOutlined, ReloadOutlined, RobotOutlined, SendOutlined } from '@ant-design/icons'
+import type { ChangeEvent } from 'react'
+import {
+  App as AntdApp,
+  Avatar,
+  Button,
+  Card,
+  Flex,
+  Image,
+  Input,
+  Space,
+  Spin,
+  Tooltip,
+  Typography,
+  theme,
+} from 'antd'
+import {
+  CloseOutlined,
+  FileAddOutlined,
+  PictureOutlined,
+  ReloadOutlined,
+  RobotOutlined,
+  SendOutlined,
+} from '@ant-design/icons'
 import { useNavigate } from 'react-router'
 
 import { generateWorkOrderDraft, startIntentInference, submitWorkOrderDraft } from '../../api/ai'
 import type { IntentNode, WorkOrderDraft } from '../../api/ai'
 import { clearDraft, draftInputRounds, emptyDraft, loadDraft, saveDraft } from '../../api/aiSession'
 import type { IntentDraft, IntentRound } from '../../api/aiSession'
+import { uploadFile } from '../../api/files'
+import type { UploadedFile } from '../../api/files'
 import { ChatBubble } from './components/ChatBubble'
 import type { BubbleContent } from './components/ChatBubble'
 import { WorkOrderDraftDrawer } from './components/WorkOrderDraftDrawer'
@@ -24,6 +47,25 @@ const GUIDE_TIPS = [
   { label: '地点', hint: '哪台设备、哪个系统或哪间办公室，比如「行政楼三楼」「财务系统」' },
   { label: '现象', hint: '你看到了什么、做到哪一步出的错，比如「导出报表一直转圈」' },
 ]
+
+/** 每条消息最多几张图。后端有同样的校验，这里先挡是为了给出即时反馈。 */
+const MAX_IMAGES = 3
+/** 单张图片上限。service-files 的 multipart 上限是 50MB，这条是产品约束。 */
+const MAX_IMAGE_SIZE = 10 * 1024 * 1024
+const MAX_IMAGE_SIZE_TEXT = '10MB'
+
+/**
+ * 已经选好、正在上传（或上传完）但还没随消息发出的图片。
+ * 它只活在当前页面：刷新后未发送的图片会丢，已进入对话的那些随轮次持久化。
+ */
+interface PendingAttachment {
+  uid: string
+  name: string
+  status: 'uploading' | 'ready' | 'failed'
+  /** 上传成功后的结果，`status === 'ready'` 时才有 */
+  file?: UploadedFile
+  error?: string
+}
 
 /**
  * 智能提单：意图推断 + 工单生成，都在这一页完成。
@@ -52,6 +94,11 @@ const GUIDE_TIPS = [
  * ## 状态的持久化
  * 草稿（每轮的输入 + 选项 + 选中的那张 + 最近生成的工单）落在 sessionStorage 里，
  * 见 `api/aiSession.ts`。
+ *
+ * ## 图片附件与识图
+ * 选图后**立即上传**（service-files），待发送列表只活在本页；发送时把已上传的地址记进
+ * 本轮草稿，并随 `userInput` 一起传给 service-ai。后端先识图、再据此做意图推断；
+ * 识图结果只留在后端，用户看到的是结合图片内容的追问或选项。
  */
 export default function IntentInference() {
   const { message } = AntdApp.useApp()
@@ -68,6 +115,11 @@ export default function IntentInference() {
   const [error, setError] = useState<string | null>(null)
   const [drawerOpen, setDrawerOpen] = useState(false)
   const [submitting, setSubmitting] = useState(false)
+  /** 待发送图片：选图后立即上传，发送时只带走上传成功的那些 */
+  const [pending, setPending] = useState<PendingAttachment[]>([])
+  const fileInputRef = useRef<HTMLInputElement | null>(null)
+  /** 待发送图片的本地 key，只用于 React 列表和上传回调定位，不进草稿 */
+  const pendingUid = useRef(0)
   const abortRef = useRef<AbortController | null>(null)
   /** 工单生成是独立的流：中断/重新开始时要能单独掐掉，不能和意图推断共用一个 */
   const generationAbortRef = useRef<AbortController | null>(null)
@@ -82,6 +134,12 @@ export default function IntentInference() {
    * 想再提一单，走「重新开始」开一段新会话。
    */
   const submitted = draft.workOrder?.status === 'submitted'
+  /**
+   * 护栏判定这段会话已结束（无关输入累计超限）。
+   * 后端已经不再接受它的后续输入，界面上也只能「重新开始」。
+   * 用 some 而不是只看最后一轮：刷新后重新点开这段草稿时判断结果应当一致。
+   */
+  const sessionEnded = draft.rounds.some((round) => round.ended)
 
   // 每次变化都落盘：中途刷新页面时，前面几轮和会话 id 都还在
   useEffect(() => {
@@ -136,7 +194,7 @@ export default function IntentInference() {
   }, [])
 
   const run = useCallback(
-    async (text: string) => {
+    async (text: string, attachments: UploadedFile[]) => {
       const controller = new AbortController()
       abortRef.current = controller
       const conversationId = draft.conversationId
@@ -153,7 +211,16 @@ export default function IntentInference() {
         workOrder: null,
         rounds: [
           ...prev.rounds,
-          { input: text, mode: 'PENDING', model: '', question: '', options: [] },
+          {
+            input: text,
+            mode: 'PENDING',
+            model: '',
+            question: '',
+            refusal: '',
+            ended: false,
+            options: [],
+            attachments,
+          },
         ],
       }))
 
@@ -167,6 +234,8 @@ export default function IntentInference() {
         await startIntentInference({
           conversationId,
           userInput: text,
+          // 后端据此读取图片字节交给模型识图
+          images: attachments.map((attachment) => attachment.url),
           signal: controller.signal,
           // 首轮的 threadId 是后端生成的，就在这个事件里 ——
           // 它同时是下一轮、以及生成/提交工单要带的会话标识
@@ -179,6 +248,9 @@ export default function IntentInference() {
           },
           // 收到的每次都是完整一段（不是增量），直接覆盖
           onQuestion: (question) => patchActiveRound((round) => ({ ...round, question })),
+          // 护栏拦下这一轮：AI 的话就是拒绝说明；ended 表示会话已被后端结束
+          onGuardrail: (refusal, ended) =>
+            patchActiveRound((round) => ({ ...round, refusal, ended })),
           onOption: (option) => {
             received += 1
             patchActiveRound((round) => ({ ...round, options: [...round.options, option] }))
@@ -189,8 +261,10 @@ export default function IntentInference() {
         setStreaming(false)
         abortRef.current = null
         // 中途自己中断的不算"没解析出选项"，别把它报成解析失败；
-        // 追问那一轮本来就没有也不该有选项，一条都没解析出来是**正确**结果，更不能报格式错误
-        setNoOption(!controller.signal.aborted && received === 0 && mode !== 'ask')
+        // 追问和护栏拒绝这两轮本来就没有也不该有选项，一条都没解析出来是**正确**结果
+        setNoOption(
+          !controller.signal.aborted && received === 0 && mode !== 'ask' && mode !== 'refused',
+        )
       }
     },
     [draft.conversationId, patchActiveRound],
@@ -288,17 +362,104 @@ export default function IntentInference() {
   const composerValue = isFirst ? input : supplement
   const setComposerValue = isFirst ? setInput : setSupplement
   const busy = streaming || generating
-  const onSend = () => {
-    const text = composerValue.trim()
-    if (text === '' || busy || submitted) {
+  /** 还有图片在上传、或某张失败了没处理：这时不能发，否则消息会少图却没人察觉 */
+  const attachmentBlocking = pending.some((item) => item.status !== 'ready')
+  const canSend =
+    composerValue.trim() !== '' &&
+    !busy &&
+    !submitted &&
+    !sessionEnded &&
+    !attachmentBlocking
+
+  const removePending = (uid: string) => {
+    // 只从待发送列表里去掉，不调删除接口：普通用户没有删除权限，
+    // 未发送就放弃的文件会留在存储里（本轮接受的孤儿文件）
+    setPending((prev) => prev.filter((item) => item.uid !== uid))
+  }
+
+  /**
+   * 上传一张图，成功/失败都只改它自己那一项，不阻塞同一批里的其它图。
+   * uid 在上传开始时已经定下，用户中途移除这一项时回调会自然落空（map 找不到）。
+   */
+  const uploadOne = async (uid: string, file: File, conversationId: string | null) => {
+    try {
+      const uploaded = await uploadFile(file, {
+        objectType: 'AI_INTENT',
+        objectId: conversationId ?? undefined,
+      })
+      setPending((prev) =>
+        prev.map((item) =>
+          item.uid === uid ? { ...item, status: 'ready', file: uploaded } : item,
+        ),
+      )
+    } catch (err) {
+      setPending((prev) =>
+        prev.map((item) =>
+          item.uid === uid
+            ? {
+                ...item,
+                status: 'failed',
+                error: err instanceof Error ? err.message : '上传失败',
+              }
+            : item,
+        ),
+      )
+    }
+  }
+
+  /**
+   * 选图。用原生 input 而不是 antd Upload：一次选择会同时给出整批文件，
+   * 张数上限可以直接按"当前已有 + 本批"判断；Upload 的 beforeUpload 是逐个调用的，
+   * 那样得在回调之外再维护一份计数才能防止超限。
+   */
+  const onPickImages = (event: ChangeEvent<HTMLInputElement>) => {
+    const files = Array.from(event.target.files ?? [])
+    // 清空 value：否则连续选同一个文件不会触发 change
+    event.target.value = ''
+    if (files.length === 0) {
       return
     }
+
+    const remaining = MAX_IMAGES - pending.length
+    if (remaining <= 0) {
+      message.warning(`每条消息最多 ${MAX_IMAGES} 张图片`)
+      return
+    }
+    if (files.length > remaining) {
+      message.warning(`每条消息最多 ${MAX_IMAGES} 张图片，本次只保留前 ${remaining} 张`)
+    }
+
+    for (const file of files.slice(0, remaining)) {
+      if (!file.type.startsWith('image/')) {
+        message.warning(`「${file.name}」不是图片`)
+        continue
+      }
+      if (file.size > MAX_IMAGE_SIZE) {
+        message.warning(`「${file.name}」超过 ${MAX_IMAGE_SIZE_TEXT}`)
+        continue
+      }
+      pendingUid.current += 1
+      const uid = String(pendingUid.current)
+      setPending((prev) => [...prev, { uid, name: file.name, status: 'uploading' }])
+      void uploadOne(uid, file, draft.conversationId)
+    }
+  }
+
+  const onSend = () => {
+    const text = composerValue.trim()
+    if (!canSend) {
+      return
+    }
+    const attachments = pending.flatMap((item) =>
+      item.status === 'ready' && item.file ? [item.file] : [],
+    )
     if (isFirst) {
       setInput('')
     } else {
       setSupplement('')
     }
-    void run(text)
+    setPending([])
+    void run(text, attachments)
   }
 
   const onInterrupt = () => {
@@ -315,6 +476,8 @@ export default function IntentInference() {
     setDraft(emptyDraft())
     setError(null)
     setNoOption(false)
+    // 未发送的图片跟着这段会话一起作废；已上传的文件不删（没有删除权限）
+    setPending([])
   }
 
   const activeIndex = draft.rounds.length - 1
@@ -416,6 +579,16 @@ export default function IntentInference() {
       return streaming && isActive
         ? { kind: 'pending', text: '正在组织问题…' }
         : { kind: 'text', text: '（这一轮 AI 没有给出内容，可以在下面重新描述）' }
+    }
+
+    if (round.mode === 'refused') {
+      if (round.refusal !== '') {
+        return { kind: 'text', text: round.refusal }
+      }
+      // 护栏节点定了但第一个字还没到
+      return streaming && isActive
+        ? { kind: 'pending', text: '正在检查输入…' }
+        : null
     }
 
     if (round.options.length === 0) {
@@ -553,7 +726,10 @@ export default function IntentInference() {
           const content = aiBubble(round, index)
           return (
             <Fragment key={index}>
-              <ChatBubble role="user" content={{ kind: 'text', text: round.input }} />
+              <ChatBubble
+                role="user"
+                content={{ kind: 'text', text: round.input, attachments: round.attachments }}
+              />
               {content !== null && (
                 <ChatBubble role="ai" content={content} tag={round.model} />
               )}
@@ -613,6 +789,75 @@ export default function IntentInference() {
         </Button>
       )}
 
+      {/* 待发送的图片：上传成功的显示缩略图，上传中/失败显示占位与原因。
+          放在输入框上方而不是塞进气泡里 —— 它们还没成为"说过的话"。 */}
+      {pending.length > 0 && (
+        <Flex gap={8} wrap>
+          {pending.map((item) => (
+            <div key={item.uid} style={{ position: 'relative', width: 72, height: 72 }}>
+              {item.status === 'ready' && item.file ? (
+                <Image
+                  src={item.file.url}
+                  alt={item.name}
+                  width={72}
+                  height={72}
+                  style={{
+                    objectFit: 'cover',
+                    borderRadius: token.borderRadius,
+                    border: `1px solid ${token.colorBorderSecondary}`,
+                  }}
+                />
+              ) : (
+                <Tooltip
+                  title={item.status === 'failed' ? (item.error ?? '上传失败') : '正在上传…'}
+                >
+                  <div
+                    style={{
+                      width: 72,
+                      height: 72,
+                      display: 'flex',
+                      flexDirection: 'column',
+                      alignItems: 'center',
+                      justifyContent: 'center',
+                      gap: 4,
+                      padding: 4,
+                      borderRadius: token.borderRadius,
+                      border: `1px dashed ${
+                        item.status === 'failed' ? token.colorErrorBorder : token.colorBorderSecondary
+                      }`,
+                      background: item.status === 'failed' ? token.colorErrorBg : token.colorFillQuaternary,
+                    }}
+                  >
+                    {item.status === 'uploading' ? (
+                      <Spin size="small" />
+                    ) : (
+                      <Text type="danger" style={{ fontSize: token.fontSizeSM }}>
+                        上传失败
+                      </Text>
+                    )}
+                    <Text
+                      type="secondary"
+                      ellipsis
+                      style={{ fontSize: token.fontSizeSM, maxWidth: '100%' }}
+                    >
+                      {item.name}
+                    </Text>
+                  </div>
+                </Tooltip>
+              )}
+              <Button
+                size="small"
+                shape="circle"
+                icon={<CloseOutlined />}
+                onClick={() => removePending(item.uid)}
+                aria-label={`移除 ${item.name}`}
+                style={{ position: 'absolute', top: -8, right: -8 }}
+              />
+            </div>
+          ))}
+        </Flex>
+      )}
+
       <Flex gap={8} align="flex-end">
         {/* 边框直接画在 textarea 上：可见区域就是可点区域，点框内任何地方都能落焦点。
             字数绝对定位压在右下角（并让鼠标事件穿透），不占文字位置。
@@ -624,18 +869,20 @@ export default function IntentInference() {
             value={composerValue}
             onChange={(event) => setComposerValue(event.target.value)}
             placeholder={
-              submitted
-                ? '工单已创建，如需再次提单请点右上角「重新开始」'
-                : isFirst
-                  ? '例如：财务系统导出报表时一直转圈'
-                  : asking
-                    ? '回答它上面的问题，比如：昨天上午，行政楼'
-                    : '补充一些细节，比如：昨天升级之后才开始的'
+              sessionEnded
+                ? '本次会话已结束，请点右上角「重新开始」'
+                : submitted
+                  ? '工单已创建，如需再次提单请点右上角「重新开始」'
+                  : isFirst
+                    ? '例如：财务系统导出报表时一直转圈'
+                    : asking
+                      ? '回答它上面的问题，比如：昨天上午，行政楼'
+                      : '补充一些细节，比如：昨天升级之后才开始的'
             }
             // 单行起步，写长了自动长高（最多 6 行）
             autoSize={{ minRows: 1, maxRows: 6 }}
             maxLength={2000}
-            disabled={busy || submitted}
+            disabled={busy || submitted || sessionEnded}
             // 回车即发送，换行用 Shift+Enter —— 聊天框的默认手势。
             // 输入法正在组词时的回车是"选词"，不能当发送（否则中文用户每打一个词就发一次）
             onPressEnter={(event) => {
@@ -668,18 +915,39 @@ export default function IntentInference() {
               中断
             </Button>
           )}
+          <Tooltip
+            title={pending.length >= MAX_IMAGES ? `每条消息最多 ${MAX_IMAGES} 张图片` : '添加图片'}
+          >
+            <Button
+              size="large"
+              icon={<PictureOutlined />}
+              disabled={busy || submitted || sessionEnded || pending.length >= MAX_IMAGES}
+              onClick={() => fileInputRef.current?.click()}
+              aria-label="添加图片"
+            />
+          </Tooltip>
           <Button
             type="primary"
             size="large"
             icon={<SendOutlined />}
             loading={streaming}
-            disabled={composerValue.trim() === '' || generating || submitted}
+            disabled={!canSend}
             onClick={onSend}
           >
             {isFirst ? '开始分析' : asking ? '提交回答' : '继续分析'}
           </Button>
         </Space>
       </Flex>
+
+      {/* 原生 file input：一次选择给出整批文件，便于统一校验张数 */}
+      <input
+        ref={fileInputRef}
+        type="file"
+        accept="image/*"
+        multiple
+        hidden
+        onChange={onPickImages}
+      />
 
       <WorkOrderDraftDrawer
         open={drawerOpen}

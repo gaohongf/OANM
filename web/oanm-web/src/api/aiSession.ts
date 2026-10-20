@@ -1,5 +1,6 @@
 import { readWorkOrderDraft } from './ai'
 import type { IntentOption, WorkOrderDraft } from './ai'
+import type { UploadedFile } from './files'
 
 /**
  * 本次提单的草稿：用户在智能提单页说过的原话、AI 给过的选项、选中的那一条，
@@ -25,10 +26,11 @@ const STORAGE_KEY = 'oanm.ai.draft'
  * 前端不另起一套叫法，免得两边各维护一份映射又慢慢漂开。
  *
  * `PENDING` 是前端自己的状态：请求发出去了、`chat` 帧还没回来。
+ * `refused` 沿用护栏节点前后端的约定：这一轮输入被拦下，只有一句拒绝说明。
  */
-export type IntentRoundMode = 'PENDING' | 'ask' | 'options'
+export type IntentRoundMode = 'PENDING' | 'ask' | 'options' | 'refused'
 
-/** 一轮：用户说的一句话 + AI 针对它的作答（一组选项，或者一句追问） */
+/** 一轮：用户说的一句话 + AI 针对它的作答（一组选项、一句追问，或一句拒绝） */
 export interface IntentRound {
   /** 用户这一轮的**真实输入**（不是模型转述） */
   input: string
@@ -47,7 +49,21 @@ export interface IntentRound {
   model: string
   /** `mode === 'ask'` 时 AI 追问的原文（纯文本，带换行） */
   question: string
+  /** `mode === 'refused'` 时护栏给出的拒绝说明（纯文本） */
+  refusal: string
+  /**
+   * 护栏判定这段会话已结束（无关输入累计超限）。
+   * 一旦为 true，页面不再允许继续输入，只能「重新开始」。
+   */
+  ended: boolean
   options: IntentOption[]
+  /**
+   * 用户这一轮附带的图片（已经上传成功，只存地址和元信息）。
+   *
+   * 草稿整体走 `JSON.stringify`，存不了 `File`/`Blob` —— 所以选图后先上传，
+   * 这里只留上传结果。刷新页面后缩略图还能照常显示。
+   */
+  attachments: UploadedFile[]
 }
 
 /**
@@ -75,7 +91,9 @@ export interface WorkOrderGeneration {
 }
 
 type StoredRound = Pick<IntentRound, 'input' | 'options'> &
-  Partial<Pick<IntentRound, 'mode' | 'model' | 'question'>>
+  Partial<
+    Pick<IntentRound, 'mode' | 'model' | 'question' | 'refusal' | 'ended' | 'attachments'>
+  >
 
 /**
  * 校验用的"宽松草稿"：旧版本没有 `workOrder` 字段，校验不该因此把整份草稿判死。
@@ -141,12 +159,53 @@ function normalizeRound(round: StoredRound): IntentRound {
     mode: normalizeMode(round.mode),
     model: typeof round.model === 'string' ? round.model : '',
     question: typeof round.question === 'string' ? round.question : '',
+    refusal: typeof round.refusal === 'string' ? round.refusal : '',
+    ended: round.ended === true,
     options: round.options,
+    attachments: normalizeAttachments(round.attachments),
   }
 }
 
+/**
+ * 附件逐项校验、逐项丢弃。
+ *
+ * `url` 是唯一必须的字段：没有它就显示不了图。其余字段缺了用空值补，
+ * 界面最多是文件名空着，不至于让整轮对话作废。
+ */
+function normalizeAttachments(value: unknown): UploadedFile[] {
+  if (!Array.isArray(value)) {
+    return []
+  }
+  const attachments: UploadedFile[] = []
+  for (const item of value) {
+    if (typeof item !== 'object' || item === null) {
+      continue
+    }
+    const candidate = item as Record<string, unknown>
+    if (typeof candidate.url !== 'string' || candidate.url === '') {
+      continue
+    }
+    attachments.push({
+      id: typeof candidate.id === 'string' ? candidate.id : '',
+      url: candidate.url,
+      filename: typeof candidate.filename === 'string' ? candidate.filename : '',
+      originalFilename:
+        typeof candidate.originalFilename === 'string' ? candidate.originalFilename : '',
+      size: typeof candidate.size === 'number' ? candidate.size : 0,
+      contentType: typeof candidate.contentType === 'string' ? candidate.contentType : '',
+    })
+  }
+  return attachments
+}
+
 function normalizeMode(value: unknown): IntentRoundMode {
-  return value === 'ask' || value === 'PROBLEM' ? 'ask' : 'options'
+  if (value === 'ask' || value === 'PROBLEM') {
+    return 'ask'
+  }
+  if (value === 'refused') {
+    return 'refused'
+  }
+  return 'options'
 }
 
 /**

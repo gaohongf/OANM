@@ -1,6 +1,7 @@
 package com.github.gaohongf.ai.graph.wo;
 
 import java.util.HashMap;
+import java.util.List;
 import java.util.Map;
 import java.util.UUID;
 import java.util.concurrent.CompletableFuture;
@@ -36,6 +37,8 @@ public class ExtractNode implements AsyncNodeAction {
 
                 用户输入：
                 {userInput}
+
+                {vision_res}
                 """;
     }
 
@@ -43,13 +46,17 @@ public class ExtractNode implements AsyncNodeAction {
     public CompletableFuture<Map<String, Object>> apply(OverAllState state) {
         return AsyncNodeAction.node_async((s) -> {
             Map<String, Object> map = new HashMap<>();
-            String userInput = s.value("userInput", String.class).orElse(null);
+            String userInput = s.value("userInput", String.class).orElse("空");
+            List<String> vision_res = s.value("vision_res", List.class)
+                    .stream().flatMap(ls -> ls.stream()).map(vr -> "图像识别结果：\n" + vr).toList();
             String conversationId = s.value("conversationId", String.class)
                     .orElseGet(() -> UUID.randomUUID().toString().replace("-", ""));
+            System.out.println("================{extract}================");
+
             WorkOrderProblemDraft newDraft = chatClient.prompt().system(systemPrompt).user(PromptTemplate
                     .builder()
                     .template(userPrompt)
-                    .variables(Map.of("userInput", userInput))
+                    .variables(Map.of("userInput", userInput, "vision_res", vision_res))
                     .build()
                     .render())
                     .advisors(a -> a.param(ChatMemory.CONVERSATION_ID, conversationId))

@@ -1,5 +1,7 @@
 package com.github.gaohongf.ai.controller;
 
+import java.util.List;
+
 import org.springframework.http.MediaType;
 import org.springframework.http.codec.ServerSentEvent;
 import org.springframework.web.bind.annotation.GetMapping;
@@ -42,6 +44,10 @@ public class AiAssistantController {
      * 生成请求不携带 {@code userInput}。
      *
      * <p>
+     * {@code images} 是本轮用户附带的图片访问地址（逗号分隔或重复参数）。它们只会被写进
+     * 工作流状态，模型暂时看不到图片内容 —— 这是为下一步识图预留的传输链路。
+     *
+     * <p>
      * {@code @IsOpen} 保持不变：意图推断是对话入口，生成也只是接着这段对话往下走一步；
      * 真正需要授权的动作是提交建单，见下面的 {@code /wo/submit}。
      */
@@ -50,11 +56,12 @@ public class AiAssistantController {
     public Flux<ServerSentEvent<String>> workOrderUserInputIntentInference(
             @RequestParam(value = "id", required = false) String id,
             @RequestParam(value = "userInput", required = false) String userInput,
-            @RequestParam(value = "userSelect", required = false) Integer userSelect) {
+            @RequestParam(value = "userSelect", required = false) Integer userSelect,
+            @RequestParam(value = "images", required = false) List<String> images) {
         if (userSelect != null) {
             return aiAssistantService.workOrderDraftGenerate(id, userSelect);
         }
-        return aiAssistantService.workOrderUserInputIntentInference(id, userInput);
+        return aiAssistantService.workOrderUserInputIntentInference(id, userInput, images);
     }
 
     /**
