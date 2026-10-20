@@ -31,13 +31,18 @@ public class ExtractNode implements AsyncNodeAction {
                 提取时间和地点描述。
                 检查的是用户**到目前为止说过的所有话**（含前面几轮），而不是只看最后一句：
                 - 时间：事情发生在什么时候。模糊的就行（昨天上午 / 上周三 / 明天下午），不必精确到分钟。
-                - 地点：事情发生在哪里。哪栋楼、哪个办公室、哪台设备、哪个系统都算。
+                - 地点：现实世界中能找到的位置，比如哪栋楼、哪一层、哪个办公室、哪个机房、哪个工位。
+                  设备名、系统名、账号名本身不算地点（如「我的电脑」「打印机」「OA 系统」）：
+                  如果用户只说了这些、没有说明它在哪，就返回 null，不要拿它们凑数或自行推测位置。
 
-                如果用户未提及则给对应字段返回 null
+                如果用户明确表示不知道、记不清或没注意（如「我不知道什么时候」「地点记不清了」），
+                对应字段填「未知」而不是 null —— 用户已经尽力了，流程要能继续往下走。
+                只有用户完全没提到时，才给对应字段返回 null。
 
                 用户输入：
                 {userInput}
 
+                这一轮图片的内容描述（没有图片时为空）:
                 {vision_res}
                 """;
     }
@@ -47,16 +52,14 @@ public class ExtractNode implements AsyncNodeAction {
         return AsyncNodeAction.node_async((s) -> {
             Map<String, Object> map = new HashMap<>();
             String userInput = s.value("userInput", String.class).orElse("空");
-            List<String> vision_res = s.value("vision_res", List.class)
-                    .stream().flatMap(ls -> ls.stream()).map(vr -> "图像识别结果：\n" + vr).toList();
+            String vision = s.value("vision_res", String.class).orElse("");
             String conversationId = s.value("conversationId", String.class)
                     .orElseGet(() -> UUID.randomUUID().toString().replace("-", ""));
-            System.out.println("================{extract}================");
 
             WorkOrderProblemDraft newDraft = chatClient.prompt().system(systemPrompt).user(PromptTemplate
                     .builder()
                     .template(userPrompt)
-                    .variables(Map.of("userInput", userInput, "vision_res", vision_res))
+                    .variables(Map.of("userInput", userInput, "vision_res", vision))
                     .build()
                     .render())
                     .advisors(a -> a.param(ChatMemory.CONVERSATION_ID, conversationId))

@@ -58,7 +58,6 @@ public class AskNode implements AsyncNodeAction {
             String conversationId = s.value("conversationId", String.class).orElse(null);
             // 本轮识图结果。没有图片时为空串（每轮开始时由工作流入口清空）
             String vision = s.value("vision_res", String.class).orElse("");
-            System.out.println("================{ask}================");
 
             Flux<String> content = chatClient.prompt().system(systemPrompt).user(PromptTemplate
                     .builder()

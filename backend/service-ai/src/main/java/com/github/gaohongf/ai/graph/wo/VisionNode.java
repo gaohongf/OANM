@@ -7,7 +7,6 @@ import java.util.Map;
 import java.util.concurrent.CompletableFuture;
 
 import org.springframework.ai.chat.client.ChatClient;
-import org.springframework.ai.chat.memory.ChatMemory;
 import org.springframework.ai.chat.messages.UserMessage;
 import org.springframework.ai.content.Media;
 import org.springframework.util.MimeType;
@@ -30,9 +29,7 @@ public class VisionNode implements AsyncNodeAction {
     public CompletableFuture<Map<String, Object>> apply(OverAllState state) {
         return AsyncNodeAction.node_async((s) -> {
             Map<String, Object> map = new HashMap<>();
-            System.out.println("================{vision}================");
 
-            String conversationId = s.value("conversationId", String.class).orElse(null);
             List<Media> imgs = s.value("images", List.class).map(
                     images -> images.stream().map(i -> {
                         // 相对地址只有内网能访问, 必须取回字节让 Spring AI 内联给模型

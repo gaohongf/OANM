@@ -14,7 +14,6 @@ public class ValidateNode implements AsyncNodeAction {
     @Override
     public CompletableFuture<Map<String, Object>> apply(OverAllState state) {
         return AsyncNodeAction.node_async((s) -> {
-            System.out.println("================{validate}================");
             WorkOrderProblemDraft draft = s.value("draft", WorkOrderProblemDraft.class).orElse(null);
             return Map.of("missing", findMissingRequired(draft));
         }).apply(state);
