@@ -5,10 +5,10 @@ import org.springframework.boot.autoconfigure.SpringBootApplication;
 import org.springframework.cloud.client.discovery.EnableDiscoveryClient;
 import org.springframework.context.annotation.Import;
 
-import com.github.gaohongf.web.rsm.ReactiveResponseBuilder;
+import com.github.gaohongf.web.rsm.ReactiveMessageResponseBuilder;
 import com.lingyun.base.rsm.annotation.EnableRsm;
 
-@Import(ReactiveResponseBuilder.class)
+@Import(ReactiveMessageResponseBuilder.class)
 @EnableRsm 
 @SpringBootApplication
 @EnableDiscoveryClient 

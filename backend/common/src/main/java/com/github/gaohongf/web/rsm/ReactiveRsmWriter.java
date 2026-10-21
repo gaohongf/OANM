@@ -1,9 +1,10 @@
 package com.github.gaohongf.web.rsm;
 
+import org.springframework.http.server.reactive.ServerHttpResponse;
 import org.springframework.web.server.ServerWebExchange;
 
-import com.github.gaohongf.web.adapter.ServerHttpResponseAdapter;
-import com.lingyun.base.rsm.ResponseBuilder;
+import com.lingyun.base.response.ApiResponseDescriptor;
+import com.lingyun.base.response.ResponseBuilder;
 import com.lingyun.base.rsm.message.Response;
 
 /**
@@ -35,7 +36,8 @@ import com.lingyun.base.rsm.message.Response;
  * 会写到响应上</b>（取自消息键的 {@code @RsmInfo.status}）。用只收消息键的那个重载,
  * 响应体会写着"查询成功"而 HTTP 状态是别的值。
  *
- * @see com.github.gaohongf.auth.config.ReactiveRequestExceptionHandlerConfiguration 失败路径上的同一个做法
+ * @see com.github.gaohongf.auth.config.ReactiveRequestExceptionHandlerConfiguration
+ *      失败路径上的同一个做法
  */
 public class ReactiveRsmWriter {
 
@@ -50,7 +52,8 @@ public class ReactiveRsmWriter {
      *
      * @param exchange   当前请求的 exchange, 用来拿响应对象设状态码
      * @param messageKey 消息键, 用 {@code GenericRsm} 里那几个常量
-     *                   （{@code QUERY_SUCCESS} / {@code CREATE_SUCCESS} / {@code UPDATE_SUCCESS}）,
+     *                   （{@code QUERY_SUCCESS} / {@code CREATE_SUCCESS} /
+     *                   {@code UPDATE_SUCCESS}）,
      *                   与 servlet 侧 {@code @ExecutionSuccess} 取的是同一批键 ——
      *                   这样两条路的 {@code type}/{@code msg} 完全一致
      * @param data       业务数据, 可为 null
@@ -59,7 +62,9 @@ public class ReactiveRsmWriter {
     public Response success(ServerWebExchange exchange, String messageKey, Object data) {
         // 第三个参数是模板占位符的实参。传空数组而不是 null: MessageFormat 对 null 参数
         // 直接抛 NPE, 而"模板里没有占位符"恰恰是常态 —— 那会变成所有成功响应都 500。
-        return responseBuilder.build(new ServerHttpResponseAdapter(exchange.getResponse()),
-                messageKey, data, new Object[0]);
+        ServerHttpResponse response = exchange.getResponse();
+        return responseBuilder.build(new ApiResponseDescriptor(messageKey, data, null),
+                response::setStatusCode,
+                response::getHeaders);
     }
 }

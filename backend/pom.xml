@@ -13,7 +13,7 @@
         <spring-cloud-alibaba.version>2023.0.3.4</spring-cloud-alibaba.version>
         <project.build.sourceEncoding>UTF-8</project.build.sourceEncoding>
         <project.reporting.outputEncoding>UTF-8</project.reporting.outputEncoding>
-        <lingyun.version>1.0.1</lingyun.version>
+        <lingyun.version>1.0.2</lingyun.version>
         <maven.compiler.source>${java.version}</maven.compiler.source>
         <maven.compiler.target>${java.version}</maven.compiler.target>
         <sa-token.version>1.46.0</sa-token.version>

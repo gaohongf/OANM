@@ -23,7 +23,6 @@ public class OptionsNode implements AsyncNodeAction {
     private final ChatClient chatClient;
     private final String systemPrompt;
     private static final String userPrompt;
-    private final DateTimeTools dateTimeTools;
 
     static {
         userPrompt = """

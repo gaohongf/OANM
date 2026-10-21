@@ -6,7 +6,7 @@ import org.springframework.boot.autoconfigure.condition.ConditionalOnWebApplicat
 import org.springframework.context.annotation.Bean;
 
 import com.github.gaohongf.web.rsm.ReactiveRsmWriter;
-import com.lingyun.base.rsm.ResponseBuilder;
+import com.lingyun.base.response.ResponseBuilder;
 import com.lingyun.base.rsm.message.Response;
 
 /**

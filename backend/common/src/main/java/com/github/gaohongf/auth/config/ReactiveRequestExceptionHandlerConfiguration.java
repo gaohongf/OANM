@@ -1,12 +1,13 @@
 package com.github.gaohongf.auth.config;
 
 import org.springframework.boot.autoconfigure.condition.ConditionalOnWebApplication;
+import org.springframework.http.server.reactive.ServerHttpResponse;
 import org.springframework.web.bind.annotation.ExceptionHandler;
 import org.springframework.web.bind.annotation.RestControllerAdvice;
 import org.springframework.web.server.ServerWebExchange;
 
-import com.github.gaohongf.web.adapter.ServerHttpResponseAdapter;
-import com.lingyun.base.rsm.ResponseBuilder;
+import com.lingyun.base.response.ApiResponseDescriptor;
+import com.lingyun.base.response.ResponseBuilder;
 import com.lingyun.base.rsm.exception.RequestException;
 import com.lingyun.base.rsm.message.Response;
 
@@ -26,12 +27,14 @@ import reactor.core.publisher.Mono;
  * 会把鉴权失败当成一条正常的流去解析（踩过 —— 页面显示"AI 没有返回任何内容"）。
  *
  * <h2>那个 ServerHttpResponse 是 servlet 侧的, 这正是适配器存在的原因</h2>
- * RSM 的签名用的是 {@code org.springframework.http.server.ServerHttpResponse}（spring-web,
- * servlet 侧那套）, 与 WebFlux 的 {@code org.springframework.http.server.reactive.ServerHttpResponse}
+ * RSM 的签名用的是
+ * {@code org.springframework.http.server.ServerHttpResponse}（spring-web,
+ * servlet 侧那套）, 与 WebFlux 的
+ * {@code org.springframework.http.server.reactive.ServerHttpResponse}
  * <b>同名但毫无继承关系</b>, 在 WebFlux 里直接传 reactive 的响应编译都过不了。
- * servlet 侧的做法是拿 {@code ServletServerHttpResponse} 包一层 {@code HttpServletResponse},
- * 这里用 {@link ServerHttpResponseAdapter} 包一层 reactive 响应 —— 两边是同一个做法。
- *
+ * servlet 侧的做法是拿 {@code ServletServerHttpResponse} 包一层
+ * {@code HttpServletResponse},
+
  * <h2>为什么必须限定 reactive</h2>
  * common 也在 servlet 服务（service-auth / service-work-order）的 classpath 上, 而那边的异常
  * 由 RSM 自己的 servlet 适配器渲染。不限定的话这个 advice 会一并参与 servlet MVC 的异常匹配:
@@ -49,9 +52,10 @@ public class ReactiveRequestExceptionHandlerConfiguration {
 
     @ExceptionHandler(RequestException.class)
     public Mono<Response> handle(RequestException ex, ServerWebExchange exchange) {
-        Response response = responseBuilder.build(
-                new ServerHttpResponseAdapter(exchange.getResponse()),
-                ex.getMsgId(), null, ex.getVarargs());
+        ServerHttpResponse httpResponse = exchange.getResponse();
+        Response response = responseBuilder.build(new ApiResponseDescriptor(ex.getMsgId(), null, ex.getVarargs()),
+                httpResponse::setStatusCode, httpResponse::getHeaders);
+
         return Mono.just(response);
     }
 }

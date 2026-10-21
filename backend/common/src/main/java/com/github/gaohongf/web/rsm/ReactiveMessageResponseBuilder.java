@@ -1,46 +1,47 @@
 package com.github.gaohongf.web.rsm;
 
 import java.text.MessageFormat;
-import java.util.List;
 import java.util.Optional;
+import java.util.function.Consumer;
 import java.util.function.Supplier;
 
 import org.springframework.context.annotation.Primary;
-import org.springframework.http.HttpStatusCode;
-import org.springframework.http.server.ServerHttpResponse;
+import org.springframework.http.HttpHeaders;
+import org.springframework.http.HttpStatus;
 import org.springframework.stereotype.Component;
 
 import com.lingyun.base.rsm.GenericRsm;
-import com.lingyun.base.rsm.HttpStatusRsm;
-import com.lingyun.base.rsm.ResponseBuilder;
-import com.lingyun.base.rsm.RsmManager;
+import com.lingyun.base.response.ApiResponseDescriptor;
+import com.lingyun.base.response.ResponseBuilder;
 import com.lingyun.base.rsm.message.Response;
 import com.lingyun.base.rsm.message.ResponseMessage;
 import com.lingyun.base.rsm.message.ResponseMessageService;
 import com.lingyun.base.rsm.message.ResponseType;
 
 import lombok.AllArgsConstructor;
-@Primary 
-@Component 
+
+@Primary
+@Component
 @AllArgsConstructor
-public class ReactiveResponseBuilder implements ResponseBuilder<Response> {
+public class ReactiveMessageResponseBuilder implements ResponseBuilder<Response> {
 
     private final ResponseMessageService messageService;
+    private final static ResponseMessage DEFAULT_RSM_NOT_FOUND = new ResponseMessage(
+            -1,
+            GenericRsm.RSM_NOT_FOUND,
+            "未找到响应消息",
+            "ERROR",
+            HttpStatus.INTERNAL_SERVER_ERROR.value());
 
     @Override
-    public Response build(String msg, Object data, Object[] varargs) {
-        ResponseMessage message = Optional.ofNullable(messageService.findByMessageKey(msg))
-                .orElseGet(() -> messageService.findByMessageKey(HttpStatusRsm.OK));
-        return createResponse(message, varargs, data);
-    }
+    public Response build(ApiResponseDescriptor descriptor, Consumer<HttpStatus> statusConsumer,
+            Supplier<HttpHeaders> headerSupplier) {
+        ResponseMessage message = Optional.ofNullable(messageService.findByMessageKey(descriptor.getMessageKey()))
+                .or(() -> messageService.findOptByMessageKey(GenericRsm.RSM_NOT_FOUND))
+                .orElseGet(() -> DEFAULT_RSM_NOT_FOUND);
+                        statusConsumer.accept(HttpStatus.valueOf(message.getResponseStatus()));
 
-    @Override
-    public Response build(ServerHttpResponse response, String msg, Object data, Object[] varargs) {
-        ResponseMessage message = Optional.ofNullable(messageService.findByMessageKey(msg))
-                .orElseGet(() -> messageService.findByMessageKey(HttpStatusRsm.OK));
-        response.setStatusCode(HttpStatusCode.valueOf(message.getResponseStatus()));
-
-        return createResponse(message, varargs, data);
+        return createResponse(message, descriptor.getArgs(), descriptor.getData());
     }
 
     @Override
@@ -73,4 +74,5 @@ public class ReactiveResponseBuilder implements ResponseBuilder<Response> {
             return ResponseType.SUCCESS;
         }
     }
+
 }

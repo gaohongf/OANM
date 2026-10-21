@@ -4,7 +4,7 @@ import org.springframework.boot.autoconfigure.AutoConfiguration;
 import org.springframework.boot.autoconfigure.condition.ConditionalOnBean;
 import org.springframework.context.annotation.Bean;
 
-import com.lingyun.base.rsm.ResponseBuilder;
+import com.lingyun.base.response.ResponseBuilder;
 import com.lingyun.base.rsm.validation.Validation2UnifyMessageErrorAdapter;
 
 @AutoConfiguration 

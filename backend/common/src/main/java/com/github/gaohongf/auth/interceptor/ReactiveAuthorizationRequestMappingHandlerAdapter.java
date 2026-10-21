@@ -60,8 +60,6 @@ import reactor.core.scheduler.Schedulers;
 @AllArgsConstructor
 @Slf4j
 public class ReactiveAuthorizationRequestMappingHandlerAdapter extends RequestMappingHandlerAdapter {
-    // private static final Object[] EMPTY_ARGS = new Object[0];
-    // private final ResponseBuilder<Response> responseBuilder;
 
     @Override
     public @NonNull Mono<HandlerResult> handle(ServerWebExchange exchange, Object handler) {

@@ -89,7 +89,7 @@ public class WorkOrderWorkflowLauncher {
                                 .addNode("again_vision", new VisionNode(chatClient, systemPrompt, fileClient))
                                 .addNode("validate", new ValidateNode())
                                 .addNode("ask", new AskNode(chatClient, systemPrompt))
-                                .addNode("options", new OptionsNode(chatClient, systemPrompt, dateTimeTools))
+                                .addNode("options", new OptionsNode(chatClient, systemPrompt))
                                 .addNode("again_extract", new ExtractNode(chatClient, systemPrompt))
                                 .addEdge(START, "guardrail")
                                 .addConditionalEdges("guardrail",
