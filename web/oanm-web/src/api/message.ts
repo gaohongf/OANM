@@ -130,7 +130,8 @@ export async function subscribeNotifications(
  * 明确返回 null，调用方就能只做标记已读。
  */
 export function resolveNotificationTarget(item: NotificationItem): string | null {
-  if (item.type === 'work_order.created' && item.bizId) {
+  // 建单通知发给超管、派发通知发给受理人，但落点相同：都是那一张工单的详情抽屉
+  if ((item.type === 'work_order.created' || item.type === 'work_order.assigned') && item.bizId) {
     return `/ops/work-order?openId=${encodeURIComponent(item.bizId)}`
   }
   return null

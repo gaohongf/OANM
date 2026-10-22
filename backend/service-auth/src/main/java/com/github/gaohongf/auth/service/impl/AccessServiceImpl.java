@@ -33,12 +33,18 @@ public class AccessServiceImpl implements AccessService {
         UserEntity user = userDao.selectByUsername(username)
                 .orElseThrow(() -> R.<RuntimeException>error(AuthRsm.USER_DOES_NOT_EXIST));
 
-        if (passwordEncoder.matches(password, user.getPassword())) {
-            StpUtil.login(user.getId());
-            return StpUtil.getTokenInfo();
-        } else {
+        // 先验密码再查封禁状态: 不知道密码的人不该从错误信息里确认这个账号存在。
+        if (!passwordEncoder.matches(password, user.getPassword())) {
             return R.error(AuthRsm.PASSWORD_ERROR);
         }
+
+        if (Boolean.TRUE.equals(user.getLocked())) {
+            // 403, 前端会原样展示后端消息(401 会被当成登录过期并丢弃)
+            return R.error(AuthRsm.ACCOUNT_LOCKED);
+        }
+
+        StpUtil.login(user.getId());
+        return StpUtil.getTokenInfo();
     }
 
 }

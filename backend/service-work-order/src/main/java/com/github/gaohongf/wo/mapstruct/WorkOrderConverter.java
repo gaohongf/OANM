@@ -5,6 +5,7 @@ import java.util.List;
 import org.mapstruct.Mapper;
 
 import com.github.gaohongf.wo.entity.po.WorkOrderEntity;
+import com.github.gaohongf.wo.entity.res.RecentWorkOrderRes;
 import com.github.gaohongf.wo.entity.res.WorkOrderDetailRes;
 import com.github.gaohongf.wo.entity.res.WorkOrderRes;
 
@@ -30,4 +31,9 @@ public interface WorkOrderConverter {
 
     /** 详情=列表行 + 正文。两个方法分别声明, 而不是让列表也返回全部字段。 */
     WorkOrderDetailRes toDetailRes(WorkOrderEntity entity);
+
+    /** 概览的"最近动态"：只取展示需要的几个字段，不带 {@code @User} 字段。 */
+    RecentWorkOrderRes toRecentRes(WorkOrderEntity entity);
+
+    List<RecentWorkOrderRes> toRecentResList(List<WorkOrderEntity> entities);
 }

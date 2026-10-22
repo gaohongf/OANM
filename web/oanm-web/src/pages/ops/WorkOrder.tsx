@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useState } from 'react'
 import {
+  Alert,
   App as AntdApp,
   Button,
   Card,
@@ -7,6 +8,9 @@ import {
   Drawer,
   Empty,
   Input,
+  Modal,
+  Popconfirm,
+  Segmented,
   Select,
   Skeleton,
   Space,
@@ -17,7 +21,11 @@ import { PlusOutlined, ReloadOutlined, SearchOutlined } from '@ant-design/icons'
 import { useNavigate, useSearchParams } from 'react-router'
 
 import { AI_PERMISSIONS } from '../../api/ai'
+import { listUsersByPermission } from '../../api/user'
+import type { AdminUserItem } from '../../api/user'
 import {
+  assignWorkOrder,
+  claimWorkOrder,
   formatDateTime,
   getWorkOrder,
   listWorkOrders,
@@ -33,6 +41,14 @@ const { Text, Paragraph } = Typography
 
 // Select 只认 {value,label}，元数据里还带着颜色，这里摘一下
 const STATUS_SELECT_OPTIONS = STATUS_OPTIONS.map((item) => ({ value: item.value, label: item.label }))
+
+/** 列表范围。'mine' 只换一个查询参数，用户 id 由后端从会话里取 */
+type Scope = 'all' | 'mine'
+
+const SCOPE_OPTIONS: { label: string; value: Scope }[] = [
+  { label: '全部工单', value: 'all' },
+  { label: '我的工单', value: 'mine' },
+]
 
 /**
  * 工单列表。
@@ -60,12 +76,20 @@ export default function WorkOrderPage() {
   const [size, setSize] = useState(10)
   const [keyword, setKeyword] = useState('')
   const [status, setStatus] = useState<WorkOrderStatus | undefined>(undefined)
+  const [scope, setScope] = useState<Scope>('all')
   const [loading, setLoading] = useState(true)
 
   const [drawerOpen, setDrawerOpen] = useState(false)
   const [detail, setDetail] = useState<WorkOrderDetail | null>(null)
   const [detailLoading, setDetailLoading] = useState(false)
   const [searchParams, setSearchParams] = useSearchParams()
+
+  const [dispatchTarget, setDispatchTarget] = useState<WorkOrderRow | null>(null)
+  const [candidates, setCandidates] = useState<AdminUserItem[]>([])
+  const [candidateLoading, setCandidateLoading] = useState(false)
+  const [candidateError, setCandidateError] = useState<string | null>(null)
+  const [selectedAssignee, setSelectedAssignee] = useState<string | undefined>(undefined)
+  const [dispatching, setDispatching] = useState(false)
 
   const load = useCallback(
     async ({ silent = false }: { silent?: boolean } = {}) => {
@@ -79,6 +103,7 @@ export default function WorkOrderPage() {
           // 空串不要发过去 —— 后端会把它当成一个真的搜索词
           keyword: keyword.trim() || undefined,
           status,
+          mine: scope === 'mine',
         })
         setRows(page.records)
         setTotal(page.total)
@@ -88,7 +113,7 @@ export default function WorkOrderPage() {
         setLoading(false)
       }
     },
-    [current, size, keyword, status, message],
+    [current, size, keyword, status, scope, message],
   )
 
   useEffect(() => {
@@ -114,6 +139,70 @@ export default function WorkOrderPage() {
     },
     [message],
   )
+
+  /** 如果这张单的详情抽屉正开着，重新取一次，让抽屉里的状态/受理人跟着列表一起变 */
+  const refreshOpenDetail = useCallback(
+    async (id: string) => {
+      if (drawerOpen && detail?.id === id) {
+        await openDetailById(id)
+      }
+    },
+    [drawerOpen, detail, openDetailById],
+  )
+
+  const onClaim = async (record: WorkOrderRow) => {
+    try {
+      await claimWorkOrder(record.id)
+      message.success('已接取')
+    } catch (error) {
+      message.error(error instanceof Error ? error.message : '接取失败')
+    }
+    // 失败最常见的原因是"刚被别人接走"，所以无论成败都刷新一次，让列表回到真实状态。
+    await load()
+    await refreshOpenDetail(record.id)
+  }
+
+  const openDispatch = async (record: WorkOrderRow) => {
+    setDispatchTarget(record)
+    // 改派时预选当前受理人；降级成裸数字时拿不到字符串 id，就不预选
+    setSelectedAssignee(
+      record.assigneeId !== null && typeof record.assigneeId === 'object'
+        ? record.assigneeId.id
+        : undefined,
+    )
+    setCandidates([])
+    setCandidateError(null)
+    setCandidateLoading(true)
+    try {
+      const page = await listUsersByPermission(WORK_ORDER_PERMISSIONS.claim)
+      setCandidates(page.records)
+    } catch (error) {
+      // 包括 403（没有用户列表权限）：把后端的提示露出来，不要留一个空下拉让人猜
+      setCandidateError(error instanceof Error ? error.message : '加载候选人失败')
+    } finally {
+      setCandidateLoading(false)
+    }
+  }
+
+  const onDispatch = async () => {
+    if (!dispatchTarget || !selectedAssignee) {
+      message.warning('请选择受理人')
+      return
+    }
+    const workOrderId = dispatchTarget.id
+    setDispatching(true)
+    try {
+      await assignWorkOrder(workOrderId, selectedAssignee)
+      message.success('已派发')
+      setDispatchTarget(null)
+    } catch (error) {
+      message.error(error instanceof Error ? error.message : '派发失败')
+    } finally {
+      setDispatching(false)
+    }
+    await load()
+    await refreshOpenDetail(workOrderId)
+  }
 
   /**
    * 支持从消息中心直接落到某一条工单：`?openId=<工单id>`。
@@ -180,6 +269,17 @@ export default function WorkOrderPage() {
         </Space>
       }
     >
+      <Segmented<Scope>
+        value={scope}
+        options={SCOPE_OPTIONS}
+        onChange={(value) => {
+          setScope(value)
+          // 换范围回第 1 页：否则会停在"我的工单只有 3 条、当前是第 5 页"的空页上
+          setCurrent(1)
+        }}
+        style={{ marginBottom: 16 }}
+      />
+
       <Table<WorkOrderRow>
         rowKey="id"
         loading={loading}
@@ -223,6 +323,12 @@ export default function WorkOrderPage() {
             render: (_: unknown, record) => <UserCell user={record.createBy} />,
           },
           {
+            title: '受理人',
+            dataIndex: 'assigneeId',
+            width: 140,
+            render: (_: unknown, record) => <UserCell user={record.assigneeId} />,
+          },
+          {
             title: '创建时间',
             dataIndex: 'createTime',
             width: 170,
@@ -237,14 +343,39 @@ export default function WorkOrderPage() {
           },
           {
             title: '操作',
-            width: 90,
+            width: 180,
             fixed: 'right',
             render: (_, record) => (
-              <Auth code={WORK_ORDER_PERMISSIONS.detail}>
-                <Button type="link" size="small" onClick={() => void openDetailById(record.id)}>
-                  详情
-                </Button>
-              </Auth>
+              <Space size={0}>
+                <Auth code={WORK_ORDER_PERMISSIONS.detail}>
+                  <Button type="link" size="small" onClick={() => void openDetailById(record.id)}>
+                    详情
+                  </Button>
+                </Auth>
+                {/* 只有"待受理且没人认领"的单子能接。二次确认是为了防误点 */}
+                {record.status === 'NEW' && record.assigneeId === null && (
+                  <Auth code={WORK_ORDER_PERMISSIONS.claim}>
+                    <Popconfirm
+                      title="确认接取这张工单？"
+                      description="接取后你将成为受理人，状态变为「已受理」。"
+                      okText="接取"
+                      cancelText="取消"
+                      onConfirm={() => void onClaim(record)}
+                    >
+                      <Button type="link" size="small">
+                        接取
+                      </Button>
+                    </Popconfirm>
+                  </Auth>
+                )}
+                {(record.status === 'NEW' || record.status === 'ACCEPTED') && (
+                  <Auth code={WORK_ORDER_PERMISSIONS.assign}>
+                    <Button type="link" size="small" onClick={() => void openDispatch(record)}>
+                      {record.assigneeId === null ? '派发' : '改派'}
+                    </Button>
+                  </Auth>
+                )}
+              </Space>
             ),
           },
         ]}
@@ -274,6 +405,7 @@ export default function WorkOrderPage() {
               { key: 'priority', label: '优先级', children: <PriorityTag priority={detail.priority} /> },
               { key: 'status', label: '状态', children: <StatusTag status={detail.status} /> },
               { key: 'createBy', label: '创建人', children: <UserCell user={detail.createBy} /> },
+              { key: 'assignee', label: '受理人', children: <UserCell user={detail.assigneeId} /> },
               { key: 'createTime', label: '创建时间', children: formatDateTime(detail.createTime) },
               {
                 key: 'aiOption',
@@ -319,6 +451,53 @@ export default function WorkOrderPage() {
           />
         )}
       </Drawer>
+
+      <Modal
+        title={dispatchTarget?.assigneeId === null ? '派发工单' : '改派工单'}
+        open={dispatchTarget !== null}
+        okText={dispatchTarget?.assigneeId === null ? '派发' : '改派'}
+        cancelText="取消"
+        confirmLoading={dispatching}
+        onOk={() => void onDispatch()}
+        onCancel={() => setDispatchTarget(null)}
+        destroyOnHidden
+      >
+        {dispatchTarget && (
+          <div style={{ marginBottom: 12 }}>
+            把「{dispatchTarget.title}」指定给：
+          </div>
+        )}
+
+        {candidateError && (
+          <Alert type="error" showIcon message={candidateError} style={{ marginBottom: 12 }} />
+        )}
+
+        <Select<string>
+          showSearch
+          allowClear
+          loading={candidateLoading}
+          value={selectedAssignee}
+          onChange={setSelectedAssignee}
+          placeholder="选择受理人"
+          style={{ width: '100%' }}
+          // 候选人最多 200 个，本地按 label 过滤即可；再多就该改成服务端搜索了
+          optionFilterProp="label"
+          options={candidates.map((user) => ({
+            value: user.id,
+            label: user.nickname ? `${user.nickname}（${user.username}）` : user.username,
+          }))}
+        />
+
+        {!candidateLoading && !candidateError && candidates.length === 0 && (
+          <Alert
+            type="warning"
+            showIcon
+            style={{ marginTop: 12 }}
+            message="没有可派发的人"
+            description="候选人 = 持有「接取工单」权限的账号。请先在角色管理里给运维人员授权。"
+          />
+        )}
+      </Modal>
     </Card>
   )
 }

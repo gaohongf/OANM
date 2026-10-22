@@ -18,23 +18,20 @@ import reactor.core.publisher.Mono;
  * WebFlux 侧把 {@link RequestException} 渲染成 RSM 响应, 对应 servlet 侧的
  * {@code JsonResponseBodyPackerMvcAdapter.handleApiException}。
  *
- * <h2>为什么必须用带响应对象的那个 build 重载</h2>
- * {@link ResponseBuilder} 有两个 build: 一个只收消息键, 一个多收一个
- * {@code ServerHttpResponse}。<b>HTTP 状态码只有后者会写到响应上</b> —— 每个消息键都带一个
+ * <h2>为什么必须把状态码回调传进去</h2>
+ * RSM 1.0.2 的 {@link ResponseBuilder} 接收 {@link ApiResponseDescriptor} 和两个回调:
+ * 一个设状态码、一个写响应头。<b>HTTP 状态码只能通过前者写到响应上</b> —— 每个消息键都带一个
  * 状态码（{@code @RsmInfo} 的 {@code status}, 注解上是必填的; 库自己那版
- * {@code MessageResponseBuilder} 也只用它来 {@code setStatusCode}, 已对着字节码确认）。
- * 用前者的话, 响应体写着"禁止访问"、HTTP 状态却是 200: 前端按 {@code response.ok} 判断,
+ * {@code MessageResponseBuilder} 也是这么做的, 已对着字节码确认）。
+ * 不传回调的话, 响应体写着"禁止访问"、HTTP 状态却是 200: 前端按 {@code response.ok} 判断,
  * 会把鉴权失败当成一条正常的流去解析（踩过 —— 页面显示"AI 没有返回任何内容"）。
  *
- * <h2>那个 ServerHttpResponse 是 servlet 侧的, 这正是适配器存在的原因</h2>
- * RSM 的签名用的是
- * {@code org.springframework.http.server.ServerHttpResponse}（spring-web,
- * servlet 侧那套）, 与 WebFlux 的
- * {@code org.springframework.http.server.reactive.ServerHttpResponse}
- * <b>同名但毫无继承关系</b>, 在 WebFlux 里直接传 reactive 的响应编译都过不了。
- * servlet 侧的做法是拿 {@code ServletServerHttpResponse} 包一层
- * {@code HttpServletResponse},
-
+ * <h2>为什么不用再包适配器</h2>
+ * 新版 API 不再要求传入某个 Web 栈的 {@code ServerHttpResponse} 对象, 而是直接收
+ * {@code httpResponse::setStatusCode} / {@code httpResponse::getHeaders} 这样的回调,
+ * reactive 的 {@code org.springframework.http.server.reactive.ServerHttpResponse} 可以直接对接;
+ * 原来那个把 reactive 响应包成 servlet {@code ServerHttpResponse} 的适配器已经删除。
+ *
  * <h2>为什么必须限定 reactive</h2>
  * common 也在 servlet 服务（service-auth / service-work-order）的 classpath 上, 而那边的异常
  * 由 RSM 自己的 servlet 适配器渲染。不限定的话这个 advice 会一并参与 servlet MVC 的异常匹配:

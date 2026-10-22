@@ -1,6 +1,13 @@
 package com.github.gaohongf.wo.service.impl;
 
+import java.time.DayOfWeek;
+import java.time.LocalDate;
+import java.time.LocalDateTime;
+import java.util.ArrayList;
 import java.util.Arrays;
+import java.util.HashMap;
+import java.util.List;
+import java.util.Map;
 import java.util.Optional;
 import java.util.stream.Collectors;
 
@@ -9,34 +16,62 @@ import org.springframework.stereotype.Service;
 import org.springframework.util.StringUtils;
 
 import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
+import com.baomidou.mybatisplus.core.conditions.query.QueryWrapper;
 import com.baomidou.mybatisplus.core.metadata.IPage;
 import com.baomidou.mybatisplus.core.toolkit.Wrappers;
 import com.baomidou.mybatisplus.extension.plugins.pagination.Page;
+import com.github.gaohongf.auth.client.ApiResponse;
+import com.github.gaohongf.auth.client.UserClient;
+import com.github.gaohongf.auth.resolve.UserLookup;
+import com.github.gaohongf.auth.res.UserAuthorities;
+import com.github.gaohongf.auth.res.UserRes;
 import com.github.gaohongf.model.PageRes;
 import com.github.gaohongf.wo.dao.WorkOrderDao;
 import com.github.gaohongf.wo.entity.po.WorkOrderEntity;
 import com.github.gaohongf.wo.entity.po.WorkOrderStatus;
+import com.github.gaohongf.wo.entity.req.AssignWorkOrderCommand;
 import com.github.gaohongf.wo.entity.req.SubmitWorkOrderCommand;
+import com.github.gaohongf.wo.entity.res.DailyCountRes;
+import com.github.gaohongf.wo.entity.res.RecentWorkOrderRes;
 import com.github.gaohongf.wo.entity.res.WorkOrderDetailRes;
 import com.github.gaohongf.wo.entity.res.WorkOrderRes;
+import com.github.gaohongf.wo.entity.res.WorkOrderStatsRes;
 import com.github.gaohongf.wo.mapstruct.WorkOrderConverter;
+import com.github.gaohongf.wo.mq.WorkOrderAssignedEvent;
 import com.github.gaohongf.wo.mq.WorkOrderCreatedEvent;
 import com.github.gaohongf.wo.rsm.WorkOrderRsm;
 import com.github.gaohongf.wo.service.WorkOrderService;
 import com.lingyun.base.rsm.R;
 
+import cn.dev33.satoken.stp.StpUtil;
 import lombok.AllArgsConstructor;
+import lombok.extern.slf4j.Slf4j;
 
+@Slf4j
 @AllArgsConstructor
 @Service
 public class WorkOrderServiceImpl implements WorkOrderService {
 
+    /**
+     * 接取工单接口的权限键。
+     * <p>
+     * 派发候选人就是"持有这个键（或 {@code *}）的人"。写成常量而不是散在比较里：
+     * 它必须与 {@code OpsWorkOrderController} 上的路径逐字一致，而两处一旦漂移，
+     * 症状是"候选人列表看着正常、派发却被拒绝"，很难一眼定位。
+     */
+    private static final String CLAIM_PERMISSION = "PUT:/api/ops/work_order/{id}/claim";
+
+    /** 概览"最近动态"的条数。再多就不是"最近"了，而是第二个列表页 */
+    private static final int RECENT_LIMIT = 6;
+
     private final WorkOrderDao workOrderDao;
     private final WorkOrderConverter workOrderConverter;
     private final ApplicationEventPublisher eventPublisher;
+    private final UserLookup userLookup;
+    private final UserClient userClient;
 
     @Override
-    public PageRes<WorkOrderRes> page(long current, long size, String keyword, String status) {
+    public PageRes<WorkOrderRes> page(long current, long size, String keyword, String status, boolean mine) {
         long safeCurrent = PageRes.clampCurrent(current);
         long safeSize = PageRes.clampSize(size);
         WorkOrderStatus statusValue = parseStatus(status);
@@ -46,17 +81,289 @@ public class WorkOrderServiceImpl implements WorkOrderService {
                 .and(StringUtils.hasText(keyword), w -> w
                         .like(WorkOrderEntity::getTitle, keyword)
                         .or()
-                        .like(WorkOrderEntity::getProblemDescription, keyword))
-                // 新的在前 —— 与 PermissionServiceImpl 的升序相反, 这是有意的:
-                // 权限列表是"查某一行"（顺序无所谓, 求稳定）, 工单列表是"看最近发生了什么",
-                // 升序会把刚建的工单压到最后几页。加 id 是为了 create_time 相同时有确定顺序
-                // （同一秒批量插入时, 没有这个次级键翻页会出现重复/漏行）。
-                .orderByDesc(WorkOrderEntity::getCreateTime)
+                        .like(WorkOrderEntity::getProblemDescription, keyword));
+
+        if (mine) {
+            // 登录人由服务端取, 不接受前端传 user id —— 否则"我的工单"可以变成"查别人的工单"。
+            // 不写成 eq(mine, ...) 是因为方法引用的参数会被提前求值, mine=false 时也会调一次 StpUtil。
+            wrapper.eq(WorkOrderEntity::getAssigneeId, StpUtil.getLoginIdAsLong());
+        }
+
+        // 新的在前 —— 与 PermissionServiceImpl 的升序相反, 这是有意的:
+        // 权限列表是"查某一行"（顺序无所谓, 求稳定）, 工单列表是"看最近发生了什么",
+        // 升序会把刚建的工单压到最后几页。加 id 是为了 create_time 相同时有确定顺序
+        // （同一秒批量插入时, 没有这个次级键翻页会出现重复/漏行）。
+        wrapper.orderByDesc(WorkOrderEntity::getCreateTime)
                 .orderByDesc(WorkOrderEntity::getId);
 
         IPage<WorkOrderEntity> page = workOrderDao.selectPage(new Page<>(safeCurrent, safeSize), wrapper);
         return new PageRes<>(page.getTotal(), page.getCurrent(), page.getSize(),
                 workOrderConverter.toResList(page.getRecords()));
+    }
+
+    @Override
+    public void claim(Long id) {
+        Long userId = StpUtil.getLoginIdAsLong();
+
+        WorkOrderEntity current = workOrderDao.selectById(id);
+        if (current == null) {
+            R.error(WorkOrderRsm.WORK_ORDER_NOT_FOUND);
+        }
+        if (current.getStatus() != WorkOrderStatus.NEW || current.getAssigneeId() != null) {
+            R.error(WorkOrderRsm.WORK_ORDER_NOT_CLAIMABLE);
+        }
+
+        WorkOrderEntity patch = new WorkOrderEntity();
+        // 必须带上读到的版本号: 为 null 时乐观锁拦截器会直接跳过, 并发的派发就能覆盖这次接取。
+        patch.setVersion(current.getVersion() == null ? 0 : current.getVersion());
+        patch.setAssigneeId(userId);
+        patch.setStatus(WorkOrderStatus.ACCEPTED);
+
+        // 状态/受理人条件与版本条件一起构成原子更新: 两个人同时接同一单时只有一个能落到 1 行。
+        int rows = workOrderDao.update(patch, Wrappers.<WorkOrderEntity>lambdaUpdate()
+                .eq(WorkOrderEntity::getId, id)
+                .eq(WorkOrderEntity::getStatus, WorkOrderStatus.NEW)
+                .isNull(WorkOrderEntity::getAssigneeId));
+        if (rows == 0) {
+            R.error(WorkOrderRsm.WORK_ORDER_ALREADY_CLAIMED);
+        }
+    }
+
+    @Override
+    public void assign(Long id, AssignWorkOrderCommand command) {
+        Long assigneeId = command.toAssigneeId();
+        Long operatorId = StpUtil.getLoginIdAsLong();
+
+        WorkOrderEntity current = workOrderDao.selectById(id);
+        if (current == null) {
+            R.error(WorkOrderRsm.WORK_ORDER_NOT_FOUND);
+        }
+        WorkOrderStatus status = current.getStatus();
+        if (status != WorkOrderStatus.NEW && status != WorkOrderStatus.ACCEPTED) {
+            R.error(WorkOrderRsm.WORK_ORDER_NOT_ASSIGNABLE);
+        }
+        // 已经在这个人名下, 再派一次没有任何变化 —— 不改库, 也不会多发一条通知。
+        if (status == WorkOrderStatus.ACCEPTED && assigneeId.equals(current.getAssigneeId())) {
+            return;
+        }
+
+        // 远程校验放在更新之前、事务之外: 失败时库里什么都没动, 重试是安全的。
+        validateAssignee(assigneeId);
+
+        int currentVersion = current.getVersion() == null ? 0 : current.getVersion();
+        WorkOrderEntity patch = new WorkOrderEntity();
+        patch.setId(id);
+        patch.setVersion(currentVersion);
+        patch.setAssigneeId(assigneeId);
+        patch.setStatus(WorkOrderStatus.ACCEPTED);
+
+        int rows = workOrderDao.updateById(patch);
+        if (rows == 0) {
+            // 版本冲突或者单据刚好被删。重查一次, 把两种结果分开报, 免得让人对着
+            // "已被修改"去刷新一个已经不存在的工单。
+            if (workOrderDao.selectById(id) == null) {
+                R.error(WorkOrderRsm.WORK_ORDER_NOT_FOUND);
+            }
+            R.error(WorkOrderRsm.WORK_ORDER_CONCURRENT_MODIFIED);
+        }
+
+        // 版本号不等拦截器回写实体, 直接用"读到的版本 + 1": 与乐观锁的成功条件完全等价。
+        eventPublisher.publishEvent(new WorkOrderAssignedEvent(id, current.getTitle(),
+                current.getType(), assigneeId, operatorId, currentVersion + 1));
+    }
+
+    /**
+     * 派发前校验受理人：存在、未封禁、持有接单权限。
+     * <p>
+     * "问不到"（service-auth 不可用）和"没权限"必须分开报：前者重试有意义，后者没有。
+     * 这是 {@link UserLookup} 用"null 表示不存在、异常表示没问到"这套契约的意义所在。
+     */
+    private void validateAssignee(Long assigneeId) {
+        UserRes user;
+        try {
+            user = userLookup.findById(assigneeId);
+        } catch (RuntimeException failure) {
+            log.warn("校验受理人 {} 失败: 用户服务不可用", assigneeId, failure);
+            R.error(WorkOrderRsm.WORK_ORDER_ASSIGNEE_VERIFY_UNAVAILABLE);
+            return;
+        }
+        if (user == null) {
+            R.error(WorkOrderRsm.WORK_ORDER_ASSIGNEE_NOT_FOUND);
+        }
+        if (Boolean.TRUE.equals(user.getLocked())) {
+            R.error(WorkOrderRsm.WORK_ORDER_ASSIGNEE_LOCKED);
+        }
+
+        UserAuthorities authorities;
+        try {
+            ApiResponse<UserAuthorities> response = userClient.findAuthorities(assigneeId);
+            if (response == null) {
+                throw new IllegalStateException("查询用户 " + assigneeId + " 的权限失败: 响应为空");
+            }
+            // 后端业务失败是 HTTP 200 + type=ERROR, 不检查信封会把"内部错误"当成"没有权限"
+            response.requireSuccess("查询用户 " + assigneeId + " 的权限");
+            authorities = response.data();
+        } catch (RuntimeException failure) {
+            log.warn("校验受理人 {} 的接单权限失败: 权限服务不可用", assigneeId, failure);
+            R.error(WorkOrderRsm.WORK_ORDER_ASSIGNEE_VERIFY_UNAVAILABLE);
+            return;
+        }
+
+        boolean allowed = authorities != null && (authorities.permissions().contains("*")
+                || authorities.permissions().contains(CLAIM_PERMISSION));
+        if (!allowed) {
+            R.error(WorkOrderRsm.WORK_ORDER_ASSIGNEE_HAS_NO_CLAIM_PERMISSION);
+        }
+    }
+
+    @Override
+    public WorkOrderStatsRes stats(int days) {
+        // 只认 7 / 30: 前端只有这两个档位，传别的值多半是调用方写错了，按 7 天处理比报错有用。
+        int window = days == 30 ? 30 : 7;
+        LocalDate today = LocalDate.now();
+        LocalDateTime todayStart = today.atStartOfDay();
+
+        WorkOrderStatsRes result = new WorkOrderStatsRes();
+        Map<String, Long> byStatus = countByStatus();
+        result.setPending(byStatus.getOrDefault(WorkOrderStatus.NEW.name(), 0L));
+        result.setAccepted(byStatus.getOrDefault(WorkOrderStatus.ACCEPTED.name(), 0L));
+        result.setResolved(byStatus.getOrDefault(WorkOrderStatus.RESOLVED.name(), 0L));
+        result.setClosed(byStatus.getOrDefault(WorkOrderStatus.CLOSED.name(), 0L));
+        // 直接对分组结果求和, 而不是再查一次 COUNT(*): 两者在同一时刻可能差一行,
+        // 而概览上的"总数"应当等于下面几块之和。
+        result.setTotal(byStatus.values().stream().mapToLong(Long::longValue).sum());
+
+        // 周一为一周的开始。前端文案写的是"本周", 不用"近 7 天"来冒充。
+        LocalDate weekStart = today.with(DayOfWeek.MONDAY);
+        result.setWeekCreated(countCreated(weekStart.atStartOfDay(), null));
+        result.setLastWeekCreated(countCreated(weekStart.minusWeeks(1).atStartOfDay(),
+                weekStart.atStartOfDay()));
+
+        result.setTodayCompleted(countCompleted(todayStart, null));
+        result.setYesterdayCompleted(countCompleted(todayStart.minusDays(1), todayStart));
+
+        result.setDaily(daily(today.minusDays(window - 1L), today));
+        result.setRecent(recent());
+        return result;
+    }
+
+    /**
+     * 按状态分组计数。
+     * <p>
+     * 用 {@code selectMaps} 而不是四次 {@code selectCount}：这是同一个聚合，一次往返就能拿全，
+     * 也保证各分块看到的是同一时刻的数据。逻辑删除条件由 MyBatis-Plus 自动拼上。
+     */
+    private Map<String, Long> countByStatus() {
+        List<Map<String, Object>> rows = workOrderDao.selectMaps(
+                Wrappers.<WorkOrderEntity>query()
+                        .select("status", "COUNT(*) AS cnt")
+                        .groupBy("status"));
+        Map<String, Long> counts = new HashMap<>();
+        for (Map<String, Object> row : rows) {
+            Object status = row.get("status");
+            if (status != null) {
+                counts.put(String.valueOf(status), toLong(row.get("cnt")));
+            }
+        }
+        return counts;
+    }
+
+    /** 某个时间点之后（可带右开区间）创建的工单数 */
+    private long countCreated(LocalDateTime start, LocalDateTime end) {
+        LambdaQueryWrapper<WorkOrderEntity> wrapper = Wrappers.<WorkOrderEntity>lambdaQuery()
+                .ge(WorkOrderEntity::getCreateTime, start);
+        if (end != null) {
+            wrapper.lt(WorkOrderEntity::getCreateTime, end);
+        }
+        return workOrderDao.selectCount(wrapper);
+    }
+
+    /**
+     * 某个时间区间内"完成"的工单数。
+     * <p>
+     * 没有独立的完成时间字段，这里用 {@code update_time} 近似 —— 口径写在
+     * {@link WorkOrderStatsRes} 的类注释里。等"解决/关闭"接口做出来后再换成真实时间。
+     */
+    private long countCompleted(LocalDateTime start, LocalDateTime end) {
+        LambdaQueryWrapper<WorkOrderEntity> wrapper = Wrappers.<WorkOrderEntity>lambdaQuery()
+                // 用字符串而不是枚举值: status 列是 varchar, 这里不需要经过枚举类型处理器
+                .in(WorkOrderEntity::getStatus,
+                        WorkOrderStatus.RESOLVED.name(), WorkOrderStatus.CLOSED.name())
+                .ge(WorkOrderEntity::getUpdateTime, start);
+        if (end != null) {
+            wrapper.lt(WorkOrderEntity::getUpdateTime, end);
+        }
+        return workOrderDao.selectCount(wrapper);
+    }
+
+    /**
+     * 逐日新增/完成。
+     * <p>
+     * 没有数据的日子显式补 0：让前端自己补洞的话，"哪几天真的是 0"和
+     * "后端忘了返回这一天"在界面上看起来一模一样。
+     */
+    private List<DailyCountRes> daily(LocalDate start, LocalDate end) {
+        Map<String, Long> created = countDaily("create_time", start, false);
+        Map<String, Long> completed = countDaily("update_time", start, true);
+
+        List<DailyCountRes> result = new ArrayList<>();
+        for (LocalDate day = start; !day.isAfter(end); day = day.plusDays(1)) {
+            String key = day.toString();
+            result.add(new DailyCountRes(key,
+                    created.getOrDefault(key, 0L),
+                    completed.getOrDefault(key, 0L)));
+        }
+        return result;
+    }
+
+    /**
+     * 按天分组计数。
+     *
+     * @param timeColumn    用于分组的列（新增看 create_time，完成看 update_time）
+     * @param completedOnly true 时只统计已解决/已关闭的单据
+     */
+    private Map<String, Long> countDaily(String timeColumn, LocalDate start, boolean completedOnly) {
+        // TO_CHAR 而不是 CAST(... AS DATE): 返回值直接是 YYYY-MM-DD 字符串, 不依赖
+        // JDBC 把 date 映射成 java.sql.Date 还是 LocalDate。列名是内部常量, 不来自入参。
+        String dayExpression = "TO_CHAR(" + timeColumn + ", 'YYYY-MM-DD')";
+        QueryWrapper<WorkOrderEntity> wrapper = Wrappers.<WorkOrderEntity>query()
+                .select(dayExpression + " AS day", "COUNT(*) AS cnt")
+                .ge(timeColumn, start.atStartOfDay())
+                .groupBy(dayExpression)
+                .orderByAsc(dayExpression);
+        if (completedOnly) {
+            wrapper.in("status", WorkOrderStatus.RESOLVED.name(), WorkOrderStatus.CLOSED.name());
+        }
+
+        List<Map<String, Object>> rows = workOrderDao.selectMaps(wrapper);
+        Map<String, Long> counts = new HashMap<>();
+        for (Map<String, Object> row : rows) {
+            Object day = row.get("day");
+            if (day != null) {
+                counts.put(String.valueOf(day), toLong(row.get("cnt")));
+            }
+        }
+        return counts;
+    }
+
+    /**
+     * 最近更新的工单。
+     * <p>
+     * 用 {@code COALESCE(update_time, create_time)} 排序，而不是只按 update_time：
+     * PostgreSQL 的 DESC 默认把 NULL 排在最前，历史数据的 update_time 一旦为空，
+     * 这些行会一直霸占"最近"的位置。
+     */
+    private List<RecentWorkOrderRes> recent() {
+        List<WorkOrderEntity> entities = workOrderDao.selectList(
+                Wrappers.<WorkOrderEntity>query()
+                        .orderByDesc("COALESCE(update_time, create_time)")
+                        .orderByDesc("id")
+                        .last("LIMIT " + RECENT_LIMIT));
+        return workOrderConverter.toRecentResList(entities);
+    }
+
+    private static long toLong(Object value) {
+        return value instanceof Number number ? number.longValue() : 0L;
     }
 
     @Override

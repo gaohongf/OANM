@@ -1,13 +1,47 @@
 import { Suspense, useMemo, useState } from 'react'
 import { Link, Outlet, useLocation, useNavigate } from 'react-router'
-import { App as AntdApp, Avatar, Breadcrumb, Button, Dropdown, Layout, Menu, Spin, theme } from 'antd'
+import {
+  App as AntdApp,
+  Avatar,
+  Breadcrumb,
+  Button,
+  Drawer,
+  Dropdown,
+  Form,
+  Grid,
+  Input,
+  Layout,
+  Menu,
+  Modal,
+  Spin,
+  theme,
+} from 'antd'
 import type { MenuProps } from 'antd'
-import { LogoutOutlined, MenuFoldOutlined, MenuUnfoldOutlined, UserOutlined } from '@ant-design/icons'
+import {
+  EditOutlined,
+  KeyOutlined,
+  LogoutOutlined,
+  MenuFoldOutlined,
+  MenuUnfoldOutlined,
+  UserOutlined,
+} from '@ant-design/icons'
 
+import * as authApi from '../api/auth'
+import { clearToken } from '../api/http'
 import { MessageBell } from '../components/MessageBell'
 import { collectPageNodes, type PageNode } from '../router/buildRoutes'
 import { useAuthStore } from '../store/auth'
 import { resolveIcon } from './menuIcons'
+
+interface NicknameForm {
+  nickname: string
+}
+
+interface PasswordForm {
+  oldPassword: string
+  newPassword: string
+  confirmPassword: string
+}
 
 const { Header, Sider, Content } = Layout
 
@@ -21,11 +55,23 @@ export function AdminLayout() {
   const location = useLocation()
   const navigate = useNavigate()
   const { message } = AntdApp.useApp()
+  const screens = Grid.useBreakpoint()
+  // md = 768px。初始渲染时断点信息还是空的，先按桌面处理，避免先闪一个抽屉再切回侧栏。
+  const isMobile = screens.md === false
   const [collapsed, setCollapsed] = useState(false)
+  const [drawerOpen, setDrawerOpen] = useState(false)
 
   const menus = useAuthStore((state) => state.menus)
   const user = useAuthStore((state) => state.user)
   const logout = useAuthStore((state) => state.logout)
+  const setUser = useAuthStore((state) => state.setUser)
+
+  const [nicknameOpen, setNicknameOpen] = useState(false)
+  const [passwordOpen, setPasswordOpen] = useState(false)
+  const [nicknameSubmitting, setNicknameSubmitting] = useState(false)
+  const [passwordSubmitting, setPasswordSubmitting] = useState(false)
+  const [nicknameForm] = Form.useForm<NicknameForm>()
+  const [passwordForm] = Form.useForm<PasswordForm>()
 
   const { token } = theme.useToken()
 
@@ -37,9 +83,41 @@ export function AdminLayout() {
 
   const selectedKeys = useMemo(() => [location.pathname], [location.pathname])
 
+  // 当前路由所在的分组。由路径推导而不是写死"运维管理/系统管理"：
+  // 以后加新分组不用回来改这里，也不会出现"当前页在折叠的分组里"。
+  const routeOpenKeys = useMemo(
+    () => toOpenKeys(pageNodes, location.pathname),
+    [pageNodes, location.pathname],
+  )
+
+  // 展开状态按路径分别记：首次进入某页用推导出的默认值（当前分组，
+  // 首页这种不在菜单里的路径则展开一级分组）；用户手动开合后，以手动结果为准。
+  // 这样不需要在 effect 里同步路由，也不会因为路由变化把用户的展开状态冲掉。
+  const [openKeysByPath, setOpenKeysByPath] = useState<Record<string, string[]>>({})
+  const defaultOpenKeys = useMemo(
+    () => (routeOpenKeys.length > 0 ? routeOpenKeys : toDirectoryKeys(pageNodes)),
+    [routeOpenKeys, pageNodes],
+  )
+  const openKeys = openKeysByPath[location.pathname] ?? defaultOpenKeys
+
+  const onOpenChange = (keys: string[]) => {
+    setOpenKeysByPath((current) => ({ ...current, [location.pathname]: keys }))
+  }
+
   const breadcrumbItems = useMemo(() => toBreadcrumb(pageNodes, location.pathname), [pageNodes, location.pathname])
 
   const userMenuItems: MenuProps['items'] = [
+    {
+      key: 'nickname',
+      icon: <EditOutlined />,
+      label: '修改昵称',
+    },
+    {
+      key: 'password',
+      icon: <KeyOutlined />,
+      label: '修改密码',
+    },
+    { type: 'divider' },
     {
       key: 'logout',
       icon: <LogoutOutlined />,
@@ -48,6 +126,14 @@ export function AdminLayout() {
   ]
 
   const onUserMenuClick: MenuProps['onClick'] = async ({ key }) => {
+    if (key === 'nickname') {
+      setNicknameOpen(true)
+      return
+    }
+    if (key === 'password') {
+      setPasswordOpen(true)
+      return
+    }
     if (key !== 'logout') {
       return
     }
@@ -56,66 +142,152 @@ export function AdminLayout() {
     navigate('/login', { replace: true })
   }
 
+  const onNicknameFinish = async (values: NicknameForm) => {
+    setNicknameSubmitting(true)
+    try {
+      const nickname = values.nickname.trim()
+      await authApi.changeOwnNickname(nickname)
+      // 局部更新即可：顶栏直接读 store 里的 user，改完立刻重渲染
+      if (user) {
+        setUser({ ...user, nickname })
+      }
+      message.success('昵称已更新')
+      setNicknameOpen(false)
+    } catch (error) {
+      message.error(error instanceof Error ? error.message : '修改昵称失败')
+    } finally {
+      setNicknameSubmitting(false)
+    }
+  }
+
+  const onPasswordFinish = async (values: PasswordForm) => {
+    setPasswordSubmitting(true)
+    try {
+      await authApi.changeOwnPassword(values.oldPassword, values.newPassword)
+      setPasswordOpen(false)
+      message.success('密码已修改，请重新登录')
+      // 后端已经注销了全部会话；这里显式清本地状态，不要再用失效的 token 发请求。
+      // 不走 logout()：它会再发一个带旧 token 的登出请求，此时必然 401。
+      clearToken()
+      useAuthStore.getState().handleUnauthorized()
+      navigate('/login', { replace: true })
+    } catch (error) {
+      message.error(error instanceof Error ? error.message : '修改密码失败')
+    } finally {
+      setPasswordSubmitting(false)
+    }
+  }
+
+  const brand = (short: boolean) => (
+    <div
+      style={{
+        height: 56,
+        display: 'flex',
+        alignItems: 'center',
+        justifyContent: 'center',
+        color: '#fff',
+        fontWeight: 600,
+        letterSpacing: 1,
+      }}
+    >
+      {short ? 'O' : 'OANM'}
+    </div>
+  )
+
+  const navMenu = (inDrawer: boolean) => (
+    <Menu
+      theme="dark"
+      mode="inline"
+      selectedKeys={selectedKeys}
+      openKeys={openKeys}
+      onOpenChange={onOpenChange}
+      items={menuItems}
+      onClick={() => {
+        if (inDrawer) {
+          setDrawerOpen(false)
+        }
+      }}
+    />
+  )
+
   return (
     <Layout style={{ minHeight: '100vh' }}>
-      <Sider
-        collapsible
-        collapsed={collapsed}
-        onCollapse={setCollapsed}
-        trigger={null}
-        // 手机端：窄屏时自动收起。standard.md 要求适配手机端。
-        breakpoint="lg"
-        collapsedWidth={64}
-        theme="dark"
-      >
-        <div
-          style={{
-            height: 56,
-            display: 'flex',
-            alignItems: 'center',
-            justifyContent: 'center',
-            color: '#fff',
-            fontWeight: 600,
-            letterSpacing: 1,
+      {!isMobile && (
+        <Sider
+          collapsible
+          collapsed={collapsed}
+          trigger={null}
+          collapsedWidth={64}
+          width={200}
+          theme="dark"
+        >
+          {brand(collapsed)}
+          {navMenu(false)}
+        </Sider>
+      )}
+
+      {/* 手机端不常驻 64px 侧栏：导航进抽屉，内容区拿回整行宽度 */}
+      {isMobile && (
+        <Drawer
+          open={drawerOpen}
+          onClose={() => setDrawerOpen(false)}
+          placement="left"
+          width={220}
+          closable={false}
+          styles={{
+            header: { display: 'none' },
+            body: { padding: 0, background: '#001529' },
           }}
         >
-          {collapsed ? 'O' : 'OANM'}
-        </div>
-        <Menu theme="dark" mode="inline" selectedKeys={selectedKeys} items={menuItems} />
-      </Sider>
+          {brand(false)}
+          {navMenu(true)}
+        </Drawer>
+      )}
 
       <Layout>
         <Header
           style={{
-            padding: '0 16px',
+            padding: isMobile ? '0 12px' : '0 16px',
             background: token.colorBgContainer,
             display: 'flex',
             alignItems: 'center',
-            gap: 12,
+            gap: isMobile ? 8 : 12,
           }}
         >
           <Button
             type="text"
-            aria-label={collapsed ? '展开菜单' : '收起菜单'}
-            icon={collapsed ? <MenuUnfoldOutlined /> : <MenuFoldOutlined />}
-            onClick={() => setCollapsed((value) => !value)}
+            aria-label={isMobile ? '打开菜单' : collapsed ? '展开菜单' : '收起菜单'}
+            icon={
+              isMobile || collapsed ? <MenuUnfoldOutlined /> : <MenuFoldOutlined />
+            }
+            onClick={() => {
+              if (isMobile) {
+                setDrawerOpen(true)
+                return
+              }
+              setCollapsed((value) => !value)
+            }}
           />
 
-          <Breadcrumb items={breadcrumbItems} style={{ flex: 1 }} />
+          <Breadcrumb items={breadcrumbItems} style={{ flex: 1, minWidth: 0 }} />
 
           {/* 在面包屑与用户菜单之间。放在这里而不是侧边栏：消息是全局的，
               它不属于任何一个菜单分支；而面包屑那一段是 flex:1，把它推到右边刚好 */}
           <MessageBell />
 
           <Dropdown menu={{ items: userMenuItems, onClick: onUserMenuClick }} placement="bottomRight">
-            <Button type="text">
-              <Avatar size="small" icon={<UserOutlined />} style={{ marginInlineEnd: 8 }} />
-              {user?.nickname || user?.username}
+            <Button type="text" aria-label="账号菜单">
+              <Avatar
+                size="small"
+                icon={<UserOutlined />}
+                style={isMobile ? undefined : { marginInlineEnd: 8 }}
+              />
+              {!isMobile && (user?.nickname || user?.username)}
             </Button>
           </Dropdown>
         </Header>
 
-        <Content style={{ margin: 16 }}>
+        <Content style={{ margin: isMobile ? 12 : 16 }}>
           {/* key 用 pathname: 切换页面时重放淡入动画, 避免内容"啪"地换掉 */}
           <div key={location.pathname} className="page-transition">
             <Suspense
@@ -130,6 +302,94 @@ export function AdminLayout() {
           </div>
         </Content>
       </Layout>
+
+      <Modal
+        title="修改昵称"
+        open={nicknameOpen}
+        okText="保存"
+        cancelText="取消"
+        confirmLoading={nicknameSubmitting}
+        onOk={() => nicknameForm.submit()}
+        onCancel={() => setNicknameOpen(false)}
+        destroyOnHidden
+      >
+        <Form<NicknameForm>
+          form={nicknameForm}
+          layout="vertical"
+          preserve={false}
+          initialValues={{ nickname: user?.nickname || user?.username || '' }}
+          onFinish={(values) => void onNicknameFinish(values)}
+        >
+          <Form.Item
+            name="nickname"
+            label="昵称"
+            rules={[
+              { required: true, whitespace: true, message: '请输入昵称' },
+              { max: 64, message: '昵称最多 64 个字符' },
+            ]}
+          >
+            <Input placeholder="显示在右上角的名称" maxLength={64} />
+          </Form.Item>
+        </Form>
+      </Modal>
+
+      <Modal
+        title="修改密码"
+        open={passwordOpen}
+        okText="确认修改"
+        cancelText="取消"
+        confirmLoading={passwordSubmitting}
+        onOk={() => passwordForm.submit()}
+        onCancel={() => setPasswordOpen(false)}
+        destroyOnHidden
+      >
+        <Form<PasswordForm>
+          form={passwordForm}
+          layout="vertical"
+          preserve={false}
+          onFinish={(values) => void onPasswordFinish(values)}
+        >
+          <Form.Item
+            name="oldPassword"
+            label="当前密码"
+            rules={[{ required: true, message: '请输入当前密码' }]}
+          >
+            <Input.Password autoComplete="current-password" />
+          </Form.Item>
+
+          <Form.Item
+            name="newPassword"
+            label="新密码"
+            rules={[
+              { required: true, message: '请输入新密码' },
+              { min: 6, max: 20, message: '密码长度为 6 到 20 个字符' },
+            ]}
+          >
+            <Input.Password autoComplete="new-password" />
+          </Form.Item>
+
+          <Form.Item
+            name="confirmPassword"
+            label="确认新密码"
+            dependencies={['newPassword']}
+            rules={[
+              { required: true, message: '请再次输入新密码' },
+              ({ getFieldValue }) => ({
+                validator(_, value) {
+                  if (!value || value === getFieldValue('newPassword')) {
+                    return Promise.resolve()
+                  }
+                  return Promise.reject(new Error('两次输入的密码不一致'))
+                },
+              }),
+            ]}
+          >
+            <Input.Password autoComplete="new-password" />
+          </Form.Item>
+
+          <div style={{ color: 'rgba(0,0,0,0.45)' }}>修改成功后所有设备都需要用新密码重新登录。</div>
+        </Form>
+      </Modal>
     </Layout>
   )
 }
@@ -155,6 +415,32 @@ function toMenuItems(nodes: PageNode[]): NonNullable<MenuProps['items']> {
         children: children.length > 0 ? children : undefined,
       }
     })
+}
+
+/** 一级分组 key。没有命中当前路由时，侧栏默认展开这些分组 */
+function toDirectoryKeys(nodes: PageNode[]): string[] {
+  return nodes
+    .filter((node) => !node.hidden && !node.component && node.children.length > 0)
+    .map((node) => `dir:${node.name}`)
+}
+
+/** 当前路径 → 它所属的分组 key（`dir:<名称>`），用于自动展开侧栏 */
+function toOpenKeys(nodes: PageNode[], pathname: string): string[] {
+  const walk = (list: PageNode[], ancestors: string[]): string[] | null => {
+    for (const node of list) {
+      if (node.component && node.path === pathname) {
+        return ancestors
+      }
+      if (node.children.length > 0) {
+        const found = walk(node.children, [...ancestors, `dir:${node.name}`])
+        if (found) {
+          return found
+        }
+      }
+    }
+    return null
+  }
+  return walk(nodes, []) ?? []
 }
 
 /** 当前路径 → 面包屑（按菜单层级拼出来，而不是只显示当前页名） */

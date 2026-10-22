@@ -20,10 +20,10 @@ import lombok.Data;
  * 无用载荷，而它们要打开抽屉才看得到。所以列表只给摘要，正文由
  * {@link WorkOrderDetailRes} 按 id 单独取。
  *
- * <h2>{@link User} 标在 createBy 上</h2>
+ * <h2>{@link User} 标在 createBy / assigneeId 上</h2>
  * 库里只存 id，序列化时才换成用户对象（见 common 的 {@code ResolveStrategyRegistry}）：
- * 解析成功是 {@code {"id":1,"username":"alice"}}，用户服务不可用时降级成 {@code {"id":1}} ——
- * 不会因为取不到用户名就让整个列表 500。前端对应地要允许字段缺失。
+ * 解析成功是 {@code {"id":"1","username":"alice"}}，用户服务不可用时降级成裸 id ——
+ * 不会因为取不到用户名就让整个列表 500。前端对应地要允许字段缺失或退化成 id。
  */
 @Data
 public class WorkOrderRes {
@@ -44,12 +44,20 @@ public class WorkOrderRes {
     /**
      * 创建人。username 默认开启, nickname 默认关闭。
      * <p>
-     * 注意这是<b>雪花 ID</b>，而 common 的用户解析器会把它输出成 JSON 数字 ——
-     * 在 JS 里超过 2^53 会丢精度。展示上无碍（用户名才是给人看的），
-     * 但不要拿这里解析出来的 id 当标识去查别的东西。
+     * 解析成功时是用户对象；解析失败（用户服务不可用）时降级成裸 id。
+     * 降级形态是雪花 ID 数字，在 JS 里可能已经丢了精度 —— 展示可以，不要拿它去查别的东西。
      */
     @User
     private Long createBy;
+
+    /**
+     * 受理人。未派发时为 null。
+     * <p>
+     * 解析规则与 {@link #createBy} 相同；列表面板同样需要这个字段，所以放在父类里，
+     * 详情不必再单独声明一份（重复声明会让 MapStruct 绕过 {@link User} 的解析）。
+     */
+    @User
+    private Long assigneeId;
 
     private LocalDateTime createTime;
 

@@ -66,6 +66,10 @@ CREATE TABLE work_orders
 CREATE INDEX idx_work_orders_status ON work_orders (status);
 CREATE INDEX idx_work_orders_conversation ON work_orders (ai_conversation_id);
 
+-- "我的工单"按受理人过滤。已经在跑的库不要执行整份脚本(它是 drop/create), 手工补:
+--     CREATE INDEX IF NOT EXISTS idx_work_orders_assignee ON work_orders (assignee_id);
+CREATE INDEX idx_work_orders_assignee ON work_orders (assignee_id);
+
 COMMENT ON TABLE work_orders IS '运维工单';
 COMMENT ON COLUMN work_orders.id IS '主键, 雪花ID';
 COMMENT ON COLUMN work_orders.title IS '工单标题';

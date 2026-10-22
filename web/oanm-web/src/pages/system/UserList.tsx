@@ -1,9 +1,18 @@
 import { useCallback, useEffect, useState } from 'react'
-import { App as AntdApp, Button, Card, Input, Modal, Select, Space, Table, Tag } from 'antd'
-import { ReloadOutlined, SearchOutlined, TeamOutlined } from '@ant-design/icons'
+import { App as AntdApp, Button, Card, Form, Input, Modal, Popconfirm, Select, Space, Table, Tag } from 'antd'
+import {
+  PlusOutlined,
+  ReloadOutlined,
+  SearchOutlined,
+  StopOutlined,
+  TeamOutlined,
+  UnlockOutlined,
+} from '@ant-design/icons'
 
 import { request } from '../../api/http'
+import { createUser, updateUserLocked } from '../../api/user'
 import { Auth } from '../../permission/Auth'
+import { useAuthStore } from '../../store/auth'
 
 interface UserRow {
   /** 字符串而不是数字：雪花 id 超过 2^53 在 JS 里会被取整，而这里要拿它拼 PUT 的路径 */
@@ -27,7 +36,14 @@ interface Role {
   label: string
 }
 
+interface CreateUserForm {
+  username: string
+  password: string
+}
+
 const PERM_GRANT = 'PUT:/api/auth/users/{id}/roles'
+const PERM_CREATE = 'POST:/api/auth/users'
+const PERM_LOCK = 'PUT:/api/auth/users/{id}/locked'
 
 /**
  * 用户管理（目前只有"分配角色"这一项写操作）。
@@ -48,6 +64,10 @@ export default function UserList() {
   const [assigning, setAssigning] = useState<UserRow | null>(null)
   const [selectedRoles, setSelectedRoles] = useState<string[]>([])
   const [submitting, setSubmitting] = useState(false)
+  const [createOpen, setCreateOpen] = useState(false)
+  const [creating, setCreating] = useState(false)
+  const [createForm] = Form.useForm<CreateUserForm>()
+  const currentUserId = useAuthStore((state) => state.user?.id)
 
   const load = useCallback(
     async ({ silent = false }: { silent?: boolean } = {}) => {
@@ -106,11 +126,41 @@ export default function UserList() {
     }
   }
 
+  const onCreateUser = async (values: CreateUserForm) => {
+    setCreating(true)
+    try {
+      // 用户名 trim 后再提交，与后端的 check() 保持一致（密码不 trim）
+      await createUser({ username: values.username.trim(), password: values.password })
+      message.success('用户创建成功，请为其分配角色')
+      setCreateOpen(false)
+      await load()
+    } catch (error) {
+      message.error(error instanceof Error ? error.message : '创建失败')
+    } finally {
+      setCreating(false)
+    }
+  }
+
+  const onToggleLocked = async (record: UserRow) => {
+    try {
+      await updateUserLocked(record.id, !record.locked)
+      message.success(record.locked ? '已解封' : '已封禁')
+      await load()
+    } catch (error) {
+      message.error(error instanceof Error ? error.message : '操作失败')
+    }
+  }
+
   return (
     <Card
       title="用户管理"
       extra={
         <Space>
+          <Auth code={PERM_CREATE}>
+            <Button type="primary" icon={<PlusOutlined />} onClick={() => setCreateOpen(true)}>
+              新建用户
+            </Button>
+          </Auth>
           <Input.Search
             allowClear
             placeholder="按用户名或昵称搜索"
@@ -163,13 +213,41 @@ export default function UserList() {
           },
           {
             title: '操作',
-            width: 120,
+            width: 220,
             render: (_, record) => (
-              <Auth code={PERM_GRANT}>
-                <Button type="link" size="small" icon={<TeamOutlined />} onClick={() => openAssign(record)}>
-                  分配角色
-                </Button>
-              </Auth>
+              <Space size={0}>
+                <Auth code={PERM_GRANT}>
+                  <Button type="link" size="small" icon={<TeamOutlined />} onClick={() => openAssign(record)}>
+                    分配角色
+                  </Button>
+                </Auth>
+                {/* 自己的行不显示封禁入口：后端也会拒绝，但没必要让人点完才知道 */}
+                {record.id !== currentUserId && (
+                  <Auth code={PERM_LOCK}>
+                    <Popconfirm
+                      title={record.locked ? `确认解封「${record.username}」？` : `确认封禁「${record.username}」？`}
+                      description={
+                        record.locked
+                          ? '解封后该用户可以重新登录。'
+                          : '该用户会被立刻踢下线，并且无法再登录。'
+                      }
+                      okText={record.locked ? '解封' : '封禁'}
+                      cancelText="取消"
+                      okButtonProps={{ danger: !record.locked }}
+                      onConfirm={() => void onToggleLocked(record)}
+                    >
+                      <Button
+                        type="link"
+                        size="small"
+                        danger={!record.locked}
+                        icon={record.locked ? <UnlockOutlined /> : <StopOutlined />}
+                      >
+                        {record.locked ? '解封' : '封禁'}
+                      </Button>
+                    </Popconfirm>
+                  </Auth>
+                )}
+              </Space>
             ),
           },
         ]}
@@ -195,6 +273,50 @@ export default function UserList() {
         <div style={{ marginTop: 12, color: 'rgba(0,0,0,0.45)' }}>
           这里提交的是<b>最终结果</b>：清空选项就等于收回该用户的全部角色。
         </div>
+      </Modal>
+
+      <Modal
+        title="新建用户"
+        open={createOpen}
+        okText="创建"
+        cancelText="取消"
+        confirmLoading={creating}
+        onOk={() => createForm.submit()}
+        onCancel={() => setCreateOpen(false)}
+        destroyOnHidden
+      >
+        <Form<CreateUserForm>
+          form={createForm}
+          layout="vertical"
+          preserve={false}
+          onFinish={(values) => void onCreateUser(values)}
+        >
+          <Form.Item
+            name="username"
+            label="用户名"
+            rules={[
+              { required: true, whitespace: true, message: '请输入用户名' },
+              { min: 2, max: 10, message: '用户名长度为 2 到 10 个字符' },
+            ]}
+          >
+            <Input placeholder="登录时使用" maxLength={10} />
+          </Form.Item>
+
+          <Form.Item
+            name="password"
+            label="初始密码"
+            rules={[
+              { required: true, message: '请输入初始密码' },
+              { min: 6, max: 20, message: '密码长度为 6 到 20 个字符' },
+            ]}
+          >
+            <Input.Password autoComplete="new-password" />
+          </Form.Item>
+
+          <div style={{ color: 'rgba(0,0,0,0.45)' }}>
+            创建后还没有角色，需要在列表里「分配角色」之后才能看到菜单。
+          </div>
+        </Form>
       </Modal>
     </Card>
   )

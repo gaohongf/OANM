@@ -42,4 +42,64 @@ public class WorkOrderRsm implements RsmManager {
      */
     @RsmInfo(template = "工单状态只能是 NEW、ACCEPTED、RESOLVED 或 CLOSED", status = HttpStatus.BAD_REQUEST)
     public static final String WORK_ORDER_STATUS_INVALID = "WorkOrder_WORK_ORDER_STATUS_INVALID";
+
+    /**
+     * 工单当前状态不允许接取。
+     * <p>
+     * 只有"待受理且尚未派发"的工单能被接取。文案把这个条件写出来，是因为最常见的误用是
+     * 对一个已经属于别人的工单再点一次接取 —— 看到条件就知道该刷新，而不是继续重试。
+     */
+    @RsmInfo(template = "工单当前状态不可接取（仅待受理且未派发的工单可以接取）", status = HttpStatus.BAD_REQUEST)
+    public static final String WORK_ORDER_NOT_CLAIMABLE = "WorkOrder_WORK_ORDER_NOT_CLAIMABLE";
+
+    /**
+     * 并发接取失败：读到的还是待受理，更新时已经被人抢走了。
+     * <p>
+     * 用 409 而不是 400，因为请求本身合法，只是此刻的状态冲突了。
+     */
+    @RsmInfo(template = "工单已被他人接取，请刷新后重试", status = HttpStatus.CONFLICT)
+    public static final String WORK_ORDER_ALREADY_CLAIMED = "WorkOrder_WORK_ORDER_ALREADY_CLAIMED";
+
+    /** 工单当前状态不允许派发（只有待受理 / 已受理可派发） */
+    @RsmInfo(template = "工单当前状态不可派发（仅待受理或已受理的工单可以派发）", status = HttpStatus.BAD_REQUEST)
+    public static final String WORK_ORDER_NOT_ASSIGNABLE = "WorkOrder_WORK_ORDER_NOT_ASSIGNABLE";
+
+    /**
+     * 派发时版本冲突：校验通过后的那一刻，工单被另一个人改了。
+     * <p>
+     * 不做自动重试：受理人权限是远程校验的，重试时它可能已经变了，静默重放会掩盖掉这个问题。
+     */
+    @RsmInfo(template = "工单已被他人修改，请刷新后重试", status = HttpStatus.CONFLICT)
+    public static final String WORK_ORDER_CONCURRENT_MODIFIED = "WorkOrder_WORK_ORDER_CONCURRENT_MODIFIED";
+
+    /** 派发入参里的受理人 id 不是合法数字 */
+    @RsmInfo(template = "受理人 id 格式不正确", status = HttpStatus.BAD_REQUEST)
+    public static final String WORK_ORDER_ASSIGNEE_INVALID = "WorkOrder_WORK_ORDER_ASSIGNEE_INVALID";
+
+    /** 要派给的人不存在（已删除或从未存在） */
+    @RsmInfo(template = "指定的受理人不存在", status = HttpStatus.BAD_REQUEST)
+    public static final String WORK_ORDER_ASSIGNEE_NOT_FOUND = "WorkOrder_WORK_ORDER_ASSIGNEE_NOT_FOUND";
+
+    /** 要派给的人已被封禁 */
+    @RsmInfo(template = "指定的受理人已被封禁", status = HttpStatus.BAD_REQUEST)
+    public static final String WORK_ORDER_ASSIGNEE_LOCKED = "WorkOrder_WORK_ORDER_ASSIGNEE_LOCKED";
+
+    /**
+     * 要派给的人不持有接单权限。
+     * <p>
+     * 派发候选人就是"能自己接单的人"，否则派过去的单子他自己也处理不了。
+     */
+    @RsmInfo(template = "指定的受理人没有接单权限", status = HttpStatus.BAD_REQUEST)
+    public static final String WORK_ORDER_ASSIGNEE_HAS_NO_CLAIM_PERMISSION =
+            "WorkOrder_WORK_ORDER_ASSIGNEE_HAS_NO_CLAIM_PERMISSION";
+
+    /**
+     * 校验受理人权限时 service-auth 不可用。
+     * <p>
+     * 刻意与"没有权限"分开：前者是暂时的依赖故障，重试有意义；后者是授权问题，重试没有意义。
+     * 用 503 表示"现在做不了，稍后再来"。
+     */
+    @RsmInfo(template = "暂时无法校验受理人权限，请稍后重试", status = HttpStatus.SERVICE_UNAVAILABLE)
+    public static final String WORK_ORDER_ASSIGNEE_VERIFY_UNAVAILABLE =
+            "WorkOrder_WORK_ORDER_ASSIGNEE_VERIFY_UNAVAILABLE";
 }

@@ -38,5 +38,25 @@ public interface UserDao extends BaseMapper<UserEntity> {
      */
     List<Long> selectUserIdsByRole(@Param("roleName") String roleName);
 
+    /**
+     * 查询持有某权限（或通配符 {@code *}）的用户 id 列表。
+     * <p>
+     * 用于"派发工单时的候选人"：候选人 = 能自己接单的人。已封号/已删除的用户不在其中，
+     * 因为他们即使被派到也处理不了。
+     *
+     * @param permissionKey 权限键，如 {@code PUT:/api/ops/work_order/{id}/claim}
+     * @return 用户 id 列表, 去重且升序; 没有人持有该权限时返回空集合
+     */
+    List<Long> selectUserIdsByPermission(@Param("permissionKey") String permissionKey);
+
     Optional<UserEntity> selectByUsername(@Param("username") String username);
+
+    /**
+     * 统计同名用户的行数, <b>包含逻辑删除的行</b>。
+     * <p>
+     * 用于创建用户前的重名检查。不能换成 {@code exists}: BaseMapper 会按 {@code @TableLogic}
+     * 追加 {@code deleted = 0}, 而"用户名"上的唯一索引并不区分逻辑删除 ——
+     * 一条已删除的同名墓碑行仍会让 insert 失败, 提前查出来才能给出业务提示而不是 500。
+     */
+    long countByUsernameIncludingDeleted(@Param("username") String username);
 }

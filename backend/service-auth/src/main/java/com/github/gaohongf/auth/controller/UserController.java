@@ -11,6 +11,7 @@ import org.springframework.web.bind.annotation.RestController;
 
 import com.github.gaohongf.auth.entity.req.CreateUserCommand;
 import com.github.gaohongf.auth.entity.req.GrantRolesCommand;
+import com.github.gaohongf.auth.entity.req.UpdateUserLockedCommand;
 import com.github.gaohongf.model.PageRes;
 import com.github.gaohongf.auth.entity.res.UserAdminRes;
 import com.github.gaohongf.auth.service.UserService;
@@ -43,14 +44,17 @@ public class UserController {
      * 一次把角色带出来，是为了让"分配角色"的弹窗不必再发一个请求 ——
      * 否则列表显示的角色和弹窗里的初始选中值可能来自两个时刻，互相矛盾。
      *
-     * @param keyword 按用户名或昵称模糊匹配
+     * @param keyword       按用户名或昵称模糊匹配
+     * @param permissionKey 非空时只返回持有该权限（或 {@code *}）的用户。
+     *                      派发工单的候选人下拉用它，避免把全量用户都列出来
      */
     @GetMapping
     public PageRes<UserAdminRes> page(
             @RequestParam(name = "current", defaultValue = "1") long current,
             @RequestParam(name = "size", defaultValue = "10") long size,
-            @RequestParam(name = "keyword", required = false) String keyword) {
-        return userService.page(current, size, keyword);
+            @RequestParam(name = "keyword", required = false) String keyword,
+            @RequestParam(name = "permissionKey", required = false) String permissionKey) {
+        return userService.page(current, size, keyword, permissionKey);
     }
 
     @GetMapping("/test")
@@ -72,5 +76,21 @@ public class UserController {
             @PathVariable("id") Long id,
             @RequestBody GrantRolesCommand command) {
         userService.grantRoles(id, command);
+    }
+
+    /**
+     * 封禁 / 解封用户。
+     * <p>
+     * 封禁会立刻踢掉该用户的全部会话, 下一次请求即被拒绝; 解封不恢复旧会话, 需要重新登录。
+     * 权限键 {@code PUT:/api/auth/users/{id}/locked} 由启动时的资源扫描自动登记,
+     * 非超级管理员角色要在角色管理里显式授权后才能调用。
+     */
+    @ExecutionSuccess(GenericRsm.UPDATE_SUCCESS)
+    @ExecutionFailed(GenericRsm.UPDATE_FAILED)
+    @PutMapping("/{id}/locked")
+    public void updateLocked(
+            @PathVariable("id") Long id,
+            @RequestBody @Valid UpdateUserLockedCommand command) {
+        userService.updateLocked(id, command);
     }
 }

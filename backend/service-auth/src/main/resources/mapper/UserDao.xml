@@ -17,8 +17,17 @@
         WHERE ur.user_id = #{userId}
           AND ur.deleted = 0
     </select>
+    <!-- 登录用, 必须过滤逻辑删除: 已删除的账号不能再登录 -->
     <select id="selectByUsername" resultType="com.github.gaohongf.auth.entity.po.UserEntity">
-        SELECT * FROM users WHERE username = #{username}
+        SELECT * FROM users WHERE username = #{username} AND deleted = 0
+    </select>
+
+    <!--
+      创建用户前的重名检查。这里故意 *不* 过滤 deleted:
+      users.username 上的唯一索引包含墓碑行, 已删除的同名用户仍然占用这个用户名。
+    -->
+    <select id="countByUsernameIncludingDeleted" resultType="long">
+        SELECT COUNT(*) FROM users WHERE username = #{username}
     </select>
 
     <!--
@@ -33,9 +42,30 @@
         FROM user_roles ur
                  INNER JOIN users u ON u.id = ur.user_id
             AND u.deleted = 0
-            AND u.locked = 0
+            AND u.locked = FALSE
         WHERE ur.role_name = #{roleName}
           AND ur.deleted = 0
+        ORDER BY u.id
+    </select>
+
+    <!--
+      按权限查用户: 用户 -> 角色 -> 角色权限 -> 权限键。
+      四张表都要过滤逻辑删除, 否则被收回的授权仍会让人出现在候选人里。
+      locked = FALSE 而不是 = 0: 该列在 PostgreSQL 里是 BOOLEAN, 和整数比较会直接报错。
+      '*' 是超级管理员的通配权限, sa-token 认它, 这里也要认, 否则超管不在候选人里。
+    -->
+    <select id="selectUserIdsByPermission" resultType="java.lang.Long">
+        SELECT DISTINCT u.id
+        FROM users u
+                 INNER JOIN user_roles ur ON ur.user_id = u.id
+            AND ur.deleted = 0
+                 INNER JOIN role_permissions rp ON rp.role_name = ur.role_name
+            AND rp.deleted = 0
+                 INNER JOIN permissions p ON p.id = rp.permission_id
+            AND p.deleted = 0
+        WHERE u.deleted = 0
+          AND u.locked = FALSE
+          AND (p.permission_key = #{permissionKey} OR p.permission_key = '*')
         ORDER BY u.id
     </select>
 </mapper>

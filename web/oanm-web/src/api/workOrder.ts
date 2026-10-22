@@ -25,6 +25,10 @@ export const WORK_ORDER_PERMISSIONS = {
   list: 'GET:/api/ops/work_order',
   detail: 'GET:/api/ops/work_order/{id}',
   create: 'POST:/api/ops/work_order',
+  claim: 'PUT:/api/ops/work_order/{id}/claim',
+  assign: 'PUT:/api/ops/work_order/{id}/assignee',
+  /** 概览统计。与列表分开授权：能看汇总不等于能看每一单 */
+  stats: 'GET:/api/ops/work_order/stats',
 } as const
 
 export interface EnumOption<T extends string> {
@@ -134,7 +138,15 @@ export interface WorkOrderRow {
   type: WorkOrderType
   priority: WorkOrderPriority
   status: WorkOrderStatus
-  createBy: ResolvedUser | null
+  /** 同 `assigneeId`：解析失败时会退化成裸数字 */
+  createBy: ResolvedUser | number | null
+  /**
+   * 受理人。未派发时为 null。
+   *
+   * 类型里的 `number` 是后端 `@User` 解析失败时的降级形态（输出裸雪花 id）：
+   * 那时候拿不到用户名，只能显示 id，见 `UserCell`。
+   */
+  assigneeId: ResolvedUser | number | null
   createTime: string | null
   aiConversationId: string | null
 }
@@ -146,8 +158,6 @@ export interface WorkOrderDetail extends WorkOrderRow {
   originalProblemDescription: string | null
   solutionDetail: string | null
   aiSelectedOptionId: number | null
-  /** 处理人 id。字符串而不是数字：它是雪花用户 id，见 `ResolvedUser` 上那段说明。 */
-  assigneeId: string | null
   assigneeNote: string | null
 }
 
@@ -163,12 +173,57 @@ export interface SubmitWorkOrderPayload {
   aiSelectedOptionId?: number
 }
 
+/** 概览趋势里的一天。后端已经把没有数据的日子补成 0 */
+export interface DailyWorkOrderCount {
+  /** YYYY-MM-DD */
+  date: string
+  created: number
+  completed: number
+}
+
+/**
+ * 概览的"最近工单动态"。
+ *
+ * 只有状态与标题，没有操作人 —— 后端没有操作日志，这一条反映的是
+ * "这张单最近变成了什么状态"，不要把它写成"某人做了某事"。
+ */
+export interface RecentWorkOrder {
+  id: string
+  title: string
+  type: WorkOrderType
+  status: WorkOrderStatus
+  updateTime: string | null
+}
+
+/**
+ * 概览统计。
+ *
+ * `resolved` / `closed` 目前没有接口能写入（解决/关闭流程还没做），所以它们
+ * 通常是 0；`todayCompleted` 和 `daily[].completed` 是"已解决/已关闭单据的
+ * update_time 落在该时间窗内"的近似值。界面如实展示，不补假数据。
+ */
+export interface WorkOrderStats {
+  total: number
+  pending: number
+  accepted: number
+  resolved: number
+  closed: number
+  weekCreated: number
+  lastWeekCreated: number
+  todayCompleted: number
+  yesterdayCompleted: number
+  daily: DailyWorkOrderCount[]
+  recent: RecentWorkOrder[]
+}
+
 export interface ListWorkOrderParams {
   current: number
   size: number
   /** 按标题/描述模糊匹配 */
   keyword?: string
   status?: WorkOrderStatus
+  /** true 时只看当前登录人名下的工单。用户 id 由后端从会话里取，前端不传 */
+  mine?: boolean
 }
 
 // ---- 接口 ----
@@ -180,7 +235,34 @@ export function listWorkOrders(params: ListWorkOrderParams): Promise<PageResult<
       size: params.size,
       keyword: params.keyword,
       status: params.status,
+      mine: params.mine ? 'true' : undefined,
     },
+  })
+}
+
+/**
+ * 概览统计。
+ *
+ * `days` 只有 7 / 30 两个档位；后端对其它值按 7 天处理，前端不传第三种。
+ */
+export function fetchWorkOrderStats(days: 7 | 30): Promise<WorkOrderStats> {
+  return request<WorkOrderStats>('/api/ops/work_order/stats', { query: { days } })
+}
+
+/** 主动接取。当前登录人由后端从会话里取，前端不传。 */
+export function claimWorkOrder(id: string): Promise<void> {
+  return request<void>(`/api/ops/work_order/${id}/claim`, { method: 'PUT' })
+}
+
+/**
+ * 派发 / 改派。
+ *
+ * `assigneeId` 必须是字符串：它是雪花 id，转成 number 会变成另一个用户。
+ */
+export function assignWorkOrder(id: string, assigneeId: string): Promise<void> {
+  return request<void>(`/api/ops/work_order/${id}/assignee`, {
+    method: 'PUT',
+    body: { assigneeId },
   })
 }
 

@@ -26,3 +26,18 @@ export function fetchCurrentUser(): Promise<CurrentUserContext> {
 export function logout(): Promise<void> {
   return request<void>('/api/auth/logout', { method: 'POST' })
 }
+
+/** 修改自己的昵称。只需要登录态，不需要额外权限。 */
+export function changeOwnNickname(nickname: string): Promise<void> {
+  return request<void>('/api/auth/me/nickname', { method: 'PUT', body: { nickname } })
+}
+
+/**
+ * 修改自己的密码。
+ *
+ * 成功后后端会注销该账号的全部会话（包括当前这个）。调用方要清 token 并回登录页，
+ * 不要接着用旧 token 发请求。
+ */
+export function changeOwnPassword(oldPassword: string, newPassword: string): Promise<void> {
+  return request<void>('/api/auth/me/password', { method: 'PUT', body: { oldPassword, newPassword } })
+}

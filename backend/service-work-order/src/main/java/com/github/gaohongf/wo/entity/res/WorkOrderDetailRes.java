@@ -31,13 +31,10 @@ public class WorkOrderDetailRes extends WorkOrderRes {
     private Integer aiSelectedOptionId;
 
     /**
-     * 处理人 id。
+     * 受理人笔记。受理人 id 在父类 {@link WorkOrderRes#getAssigneeId()} 上（带 {@code @User}）。
      * <p>
-     * String 而不是 Long: 它是用户 id(雪花 id), 理由同 {@link WorkOrderRes#getId()}。
-     * 与上面的 {@code aiSelectedOptionId} 不同 —— 那个是 AI 选项的序号(1、2、3),
-     * 小到不会有精度问题, 该保持数字。
+     * 这里刻意不再声明 {@code assigneeId}: 子类同名属性会遮蔽父类字段, MapStruct 会按
+     * {@code Long -> String} 映射, 于是 {@code @User} 的解析被绕过, 详情和列表返回两种形状。
      */
-    private String assigneeId;
-
     private String assigneeNote;
 }

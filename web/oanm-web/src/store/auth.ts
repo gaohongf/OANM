@@ -18,6 +18,8 @@ interface AuthState {
   bootstrap: () => Promise<void>
   /** token 失效时由 http 层回调 */
   handleUnauthorized: () => void
+  /** 局部更新用户信息（如改完昵称），避免为了一个字段重新拉整个上下文 */
+  setUser: (user: CurrentUser) => void
   /** 判断当前用户是否具备某权限键 */
   can: (required: string) => boolean
 }
@@ -81,6 +83,10 @@ export const useAuthStore = create<AuthState>((set, get) => ({
 
   handleUnauthorized() {
     set({ user: null, roles: [], permissions: [], menus: [], initializing: false })
+  },
+
+  setUser(user) {
+    set({ user })
   },
 
   can(required) {

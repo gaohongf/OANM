@@ -92,9 +92,26 @@ public class AuthRsm implements RsmManager{
     @RsmInfo(template = "账号已停用", status = HttpStatus.UNAUTHORIZED)
     public static final String ACCOUNT_DISABLED = "Authentication_ACCOUNT_DISABLED";
 
-    /** 用户账号已被锁定（如密码错误次数过多） */
-    @RsmInfo(template = "账号已锁定", status = HttpStatus.UNAUTHORIZED)
+    /**
+     * 用户账号已被管理员封禁（users.locked=true）。
+     * <p>
+     * 用 403 而不是 401：前端 http.ts 把所有 401 统一当成“登录过期”并丢弃后端消息，
+     * 登录页就拿不到“账号已被封禁”这个原因。
+     */
+    @RsmInfo(template = "账号已被封禁", status = HttpStatus.FORBIDDEN)
     public static final String ACCOUNT_LOCKED = "Authentication_ACCOUNT_LOCKED";
+
+    /** 修改自己的密码时，当前密码不正确。不要复用 PASSWORD_ERROR：它是 401，会被前端当成登录过期。 */
+    @RsmInfo(template = "当前密码错误", status = HttpStatus.BAD_REQUEST)
+    public static final String OLD_PASSWORD_ERROR = "Authentication_OLD_PASSWORD_ERROR";
+
+    /** 修改密码时新密码与当前密码相同 */
+    @RsmInfo(template = "新密码不能与当前密码相同", status = HttpStatus.BAD_REQUEST)
+    public static final String PASSWORD_UNCHANGED = "Authentication_PASSWORD_UNCHANGED";
+
+    /** 管理员不能封禁自己 */
+    @RsmInfo(template = "不能封禁自己", status = HttpStatus.BAD_REQUEST)
+    public static final String CANNOT_BAN_SELF = "Authentication_CANNOT_BAN_SELF";
 
     /** 注册时账号已存在 */
     @RsmInfo(template = "账户已存在", status = HttpStatus.BAD_REQUEST)

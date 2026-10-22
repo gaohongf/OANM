@@ -4,8 +4,11 @@ import java.util.List;
 
 import org.springframework.stereotype.Service;
 
+import com.github.gaohongf.auth.entity.req.ChangeOwnNicknameCommand;
+import com.github.gaohongf.auth.entity.req.ChangeOwnPasswordCommand;
 import com.github.gaohongf.auth.entity.req.CreateUserCommand;
 import com.github.gaohongf.auth.entity.req.GrantRolesCommand;
+import com.github.gaohongf.auth.entity.req.UpdateUserLockedCommand;
 import com.github.gaohongf.model.PageRes;
 import com.github.gaohongf.auth.entity.res.UserAdminRes;
 import com.github.gaohongf.auth.res.UserAuthorities;
@@ -20,9 +23,10 @@ public interface UserService {
     /**
      * 分页查询用户（含各自的角色），供管理端的用户列表与"分配角色"使用。
      *
-     * @param keyword 按用户名或昵称模糊匹配，可为空
+     * @param keyword       按用户名或昵称模糊匹配，可为空
+     * @param permissionKey 非空时只返回持有该权限（或 {@code *}）的用户，供派发候选人下拉使用
      */
-    PageRes<UserAdminRes> page(long current, long size, String keyword);
+    PageRes<UserAdminRes> page(long current, long size, String keyword, String permissionKey);
 
     /**
      * 查一个用户的角色与权限。
@@ -46,4 +50,20 @@ public interface UserService {
      * 与"给角色授权"的区别在于影响面: 这个只影响一个人, 所以缓存只需失效他自己。
      */
     void grantRoles(Long userId, GrantRolesCommand command);
+
+    /**
+     * 封禁 / 解封用户。封禁会立即踢掉该用户的全部会话。
+     *
+     * @throws com.lingyun.base.rsm.RequestException 用户不存在, 或管理员试图封禁自己
+     */
+    void updateLocked(Long id, UpdateUserLockedCommand command);
+
+    /** 修改自己的昵称, 并失效本服务里的用户缓存。 */
+    void changeOwnNickname(Long id, ChangeOwnNicknameCommand command);
+
+    /**
+     * 修改自己的密码: 校验旧密码、新密码不能与旧密码相同。
+     * 成功后注销该账号的全部会话。
+     */
+    void changeOwnPassword(Long id, ChangeOwnPasswordCommand command);
 }

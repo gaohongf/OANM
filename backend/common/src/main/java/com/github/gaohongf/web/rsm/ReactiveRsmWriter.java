@@ -31,9 +31,9 @@ import com.lingyun.base.rsm.message.Response;
  * 包装器一旦手滑, 流就再也流不出去, 而且症状是"请求一直挂着"。
  * 所以选择让反应式端点<b>显式</b>声明自己的信封 —— 多一次方法调用, 换掉一整类只在运行时暴露的错误。
  *
- * <h2>为什么用带响应的那个 build 重载</h2>
- * 与 {@code ReactiveRequestExceptionHandlerConfiguration} 同一条理由: <b>HTTP 状态码只有它
- * 会写到响应上</b>（取自消息键的 {@code @RsmInfo.status}）。用只收消息键的那个重载,
+ * <h2>为什么要把状态码回调传进去</h2>
+ * 与 {@code ReactiveRequestExceptionHandlerConfiguration} 同一条理由: <b>HTTP 状态码只能通过
+ * 状态回调写到响应上</b>（取自消息键的 {@code @RsmInfo.status}）。只构造响应体、不接响应对象,
  * 响应体会写着"查询成功"而 HTTP 状态是别的值。
  *
  * @see com.github.gaohongf.auth.config.ReactiveRequestExceptionHandlerConfiguration
@@ -60,8 +60,7 @@ public class ReactiveRsmWriter {
      * @return 已经带好状态码的响应体, 直接作为控制器返回值即是最终 JSON
      */
     public Response success(ServerWebExchange exchange, String messageKey, Object data) {
-        // 第三个参数是模板占位符的实参。传空数组而不是 null: MessageFormat 对 null 参数
-        // 直接抛 NPE, 而"模板里没有占位符"恰恰是常态 —— 那会变成所有成功响应都 500。
+        // 成功消息的模板不带占位符, 第三项（模板实参）传 null 即可。
         ServerHttpResponse response = exchange.getResponse();
         return responseBuilder.build(new ApiResponseDescriptor(messageKey, data, null),
                 response::setStatusCode,

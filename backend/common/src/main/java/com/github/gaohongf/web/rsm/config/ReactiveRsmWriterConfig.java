@@ -27,7 +27,7 @@ import com.lingyun.base.rsm.message.Response;
 public class ReactiveRsmWriterConfig {
 
     /**
-     * 注入 {@code ResponseBuilder<Response>} 时会解析到 {@code ReactiveResponseBuilder}
+     * 注入 {@code ResponseBuilder<Response>} 时会解析到 {@code ReactiveMessageResponseBuilder}
      * （反应式服务在自己的启动类上 {@code @Import} 它, 且它标了 {@code @Primary}）。
      */
     @Bean

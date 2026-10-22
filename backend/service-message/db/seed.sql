@@ -50,3 +50,29 @@ SET content_template = '工单「{title}」已提交（类型: {typeLabel}），
 WHERE template_key = 'work_order.created'
   AND channel = 'APP'
   AND content_template <> '工单「{title}」已提交（类型: {typeLabel}），请及时处理。';
+
+-- ------------------------------------------------------------
+-- 工单派发通知(站内信)
+--
+-- 参数由 service-work-order 传(见 WorkOrderAssignedNotifier):
+--   {title} 工单标题, {typeLabel} 工单类型的中文名(需求/故障)
+--
+-- 判重键与上面同: (template_key, channel), 这样已经跑起来的库里即使有人手工加过
+-- 同键模板, 也不会插出第二行。
+-- ------------------------------------------------------------
+INSERT INTO message_templates (id, template_key, channel, title_template, content_template,
+                               enabled, remark, create_time, update_time, deleted, version)
+SELECT -2, 'work_order.assigned', 'APP', '工单派发',
+       '工单「{title}」已派发给您（类型: {typeLabel}），请及时处理。',
+       1, '派发/改派成功后通知受理人', NOW(), NOW(), 0, 0
+WHERE NOT EXISTS (SELECT 1
+                  FROM message_templates
+                  WHERE template_key = 'work_order.assigned'
+                    AND channel = 'APP');
+
+UPDATE message_templates
+SET content_template = '工单「{title}」已派发给您（类型: {typeLabel}），请及时处理。',
+    update_time      = NOW()
+WHERE template_key = 'work_order.assigned'
+  AND channel = 'APP'
+  AND content_template <> '工单「{title}」已派发给您（类型: {typeLabel}），请及时处理。';

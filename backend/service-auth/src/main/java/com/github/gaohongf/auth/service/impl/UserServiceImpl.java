@@ -3,15 +3,19 @@ package com.github.gaohongf.auth.service.impl;
 import java.time.LocalDateTime;
 import java.util.List;
 import java.util.Map;
+import java.util.Objects;
 import java.util.stream.Collectors;
 
 import org.springframework.cache.annotation.CacheConfig;
+import org.springframework.cache.annotation.CacheEvict;
 import org.springframework.cache.annotation.Cacheable;
+import org.springframework.dao.DuplicateKeyException;
 import org.springframework.security.crypto.password.PasswordEncoder;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 import org.springframework.util.StringUtils;
 
+import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
 import com.baomidou.mybatisplus.core.metadata.IPage;
 import com.baomidou.mybatisplus.core.toolkit.Wrappers;
 import com.baomidou.mybatisplus.extension.plugins.pagination.Page;
@@ -25,8 +29,11 @@ import com.github.gaohongf.auth.dao.UserRoleDao;
 import com.github.gaohongf.auth.entity.po.RoleEntity;
 import com.github.gaohongf.auth.entity.po.UserEntity;
 import com.github.gaohongf.auth.entity.po.intermediate.UserRoleEntity;
+import com.github.gaohongf.auth.entity.req.ChangeOwnNicknameCommand;
+import com.github.gaohongf.auth.entity.req.ChangeOwnPasswordCommand;
 import com.github.gaohongf.auth.entity.req.CreateUserCommand;
 import com.github.gaohongf.auth.entity.req.GrantRolesCommand;
+import com.github.gaohongf.auth.entity.req.UpdateUserLockedCommand;
 import com.github.gaohongf.auth.mapstruct.UserConverter;
 import com.github.gaohongf.auth.res.UserAuthorities;
 import com.github.gaohongf.auth.res.UserRes;
@@ -34,8 +41,10 @@ import com.github.gaohongf.auth.rsm.AuthRsm;
 import com.github.gaohongf.auth.satoken.AuthorityChangeNotifier;
 import com.github.gaohongf.auth.service.UserService;
 import com.github.gaohongf.mybatis.AuditMetaObjectHandler;
+import com.lingyun.base.rsm.GenericRsm;
 import com.lingyun.base.rsm.R;
 
+import cn.dev33.satoken.stp.StpUtil;
 import lombok.AllArgsConstructor;
 
 @CacheConfig(cacheNames = CacheKeyConstants.USER_TTL + CacheKeyConstants.USER_CACHE_TTL_SECONDS)
@@ -53,15 +62,27 @@ public class UserServiceImpl implements UserService {
 
     @Override
     public void createUser(CreateUserCommand command) {
-        if (userDao.exists(Wrappers.<UserEntity>lambdaQuery().eq(UserEntity::getUsername, command.getUsername()))) {
+        command.check();
+
+        // 用 count 而不是 exists: 唯一索引不区分逻辑删除, 一条已删除的同名"墓碑行"
+        // 同样会挡住 insert。exists 会因为 @TableLogic 自动加 deleted = 0 而漏掉它,
+        // 于是把本可以明确提示的"账户已存在"变成数据库异常。
+        if (userDao.countByUsernameIncludingDeleted(command.getUsername()) > 0) {
             R.error(AuthRsm.ACCOUNT_EXISTS);
         }
 
         UserEntity userEntity = new UserEntity();
         userEntity.setUsername(command.getUsername());
-        String encodedPassword = passwordEncoder.encode(command.getPassword());
-        userEntity.setPassword(encodedPassword);
-        userDao.insert(userEntity);
+        userEntity.setPassword(passwordEncoder.encode(command.getPassword()));
+        // 昵称留空, 前端显示时回落到用户名; locked 显式给 false, 不依赖列默认值
+        userEntity.setNickname("");
+        userEntity.setLocked(false);
+        try {
+            userDao.insert(userEntity);
+        } catch (DuplicateKeyException e) {
+            // 两个管理员同时创建同名用户时, 上面的 count 可能都返回 0, 唯一索引是最后一道防线
+            R.error(AuthRsm.ACCOUNT_EXISTS);
+        }
     }
 
     /**
@@ -111,17 +132,29 @@ public class UserServiceImpl implements UserService {
     }
 
     @Override
-    public PageRes<UserAdminRes> page(long current, long size, String keyword) {
+    public PageRes<UserAdminRes> page(long current, long size, String keyword, String permissionKey) {
         long safeCurrent = PageRes.clampCurrent(current);
         long safeSize = PageRes.clampSize(size);
 
-        IPage<UserEntity> page = userDao.selectPage(new Page<>(safeCurrent, safeSize),
-                Wrappers.<UserEntity>lambdaQuery()
-                        .and(StringUtils.hasText(keyword), w -> w
-                                .like(UserEntity::getUsername, keyword)
-                                .or()
-                                .like(UserEntity::getNickname, keyword))
-                        .orderByAsc(UserEntity::getId));
+        LambdaQueryWrapper<UserEntity> wrapper = Wrappers.<UserEntity>lambdaQuery()
+                .and(StringUtils.hasText(keyword), w -> w
+                        .like(UserEntity::getUsername, keyword)
+                        .or()
+                        .like(UserEntity::getNickname, keyword));
+
+        if (StringUtils.hasText(permissionKey)) {
+            List<Long> userIds = userDao.selectUserIdsByPermission(permissionKey.trim());
+            if (userIds.isEmpty()) {
+                // 提前返回而不是把空集合交给 in(): 空 in 在不同版本里可能被渲染成非法的
+                // `IN ()`, 而且"没有人持有该权限"本来就是正常结果, 不是查询失败。
+                return new PageRes<>(0, safeCurrent, safeSize, List.of());
+            }
+            wrapper.in(UserEntity::getId, userIds);
+        }
+
+        wrapper.orderByAsc(UserEntity::getId);
+
+        IPage<UserEntity> page = userDao.selectPage(new Page<>(safeCurrent, safeSize), wrapper);
 
         Map<Long, List<String>> rolesByUser = loadRoles(page.getRecords().stream()
                 .map(UserEntity::getId)
@@ -204,5 +237,89 @@ public class UserServiceImpl implements UserService {
 
         // 只影响这一个人, 所以只失效他自己的缓存
         authorityChangeNotifier.userChanged(userId);
+    }
+
+    /**
+     * 封禁 / 解封。
+     * <p>
+     * 三个方法都刻意不加 {@code @Transactional}: 都是单行更新, 而且真正需要"事后再做"的
+     * 踢会话/注销会话不能被回滚。若放在事务里, 踢人可能先于数据库提交发生, 用户在这几毫秒内
+     * 重新登录就会拿到一个"已封禁却有效"的会话。
+     * <p>
+     * {@code @CacheEvict} 清掉 {@link #findUser} 的 12 小时 Redis 缓存, 否则封禁后
+     * 本服务返回的用户信息里 locked 还是旧值。
+     */
+    @Override
+    @CacheEvict(key = "#id")
+    public void updateLocked(Long id, UpdateUserLockedCommand command) {
+        boolean locked = Boolean.TRUE.equals(command.getLocked());
+
+        UserEntity user = userDao.selectById(id);
+        if (user == null) {
+            R.error(AuthRsm.USER_NOT_FOUND);
+        }
+        // 封禁自己会把当前管理会话也踢掉, 通常不是有意为之; 解封自己没有这个问题
+        if (locked && id.equals(StpUtil.getLoginIdAsLong())) {
+            R.error(AuthRsm.CANNOT_BAN_SELF);
+        }
+
+        if (!Objects.equals(user.getLocked(), locked)) {
+            user.setLocked(locked);
+            if (userDao.updateById(user) == 0) {
+                R.error(GenericRsm.UPDATE_FAILED);
+            }
+        }
+
+        // 成功落库后再踢。已是封禁态也再踢一次, 这样管理员可以重试上一次没踢成功的会话。
+        // 解封不恢复会话: 旧 token 已经被注销, 只能重新登录。
+        if (locked) {
+            StpUtil.kickout(id);
+        }
+    }
+
+    @Override
+    @CacheEvict(key = "#id")
+    public void changeOwnNickname(Long id, ChangeOwnNicknameCommand command) {
+        command.check();
+
+        UserEntity user = userDao.selectById(id);
+        if (user == null) {
+            R.error(AuthRsm.USER_NOT_FOUND);
+        }
+        user.setNickname(command.getNickname());
+        if (userDao.updateById(user) == 0) {
+            R.error(GenericRsm.UPDATE_FAILED);
+        }
+    }
+
+    /**
+     * 改密码后注销该账号的全部会话。
+     * <p>
+     * 用 {@code logout(id)} 而不是 {@code kickout(id)}: 两者在这里效果相同(都会清掉 token),
+     * 但 {@code logout} 的语义是"用户主动退出", 不会在 sa-token 日志里留下"被踢下线"的记录。
+     * 当前请求已经通过鉴权, 响应仍会正常返回; 前端收到成功后清 token 回登录页。
+     * <p>
+     * 密码不在 {@link UserRes} 里, 所以不需要清用户缓存。
+     */
+    @Override
+    public void changeOwnPassword(Long id, ChangeOwnPasswordCommand command) {
+        UserEntity user = userDao.selectById(id);
+        if (user == null) {
+            R.error(AuthRsm.USER_NOT_FOUND);
+        }
+
+        if (!passwordEncoder.matches(command.getOldPassword(), user.getPassword())) {
+            R.error(AuthRsm.OLD_PASSWORD_ERROR);
+        }
+        if (Objects.equals(command.getOldPassword(), command.getNewPassword())) {
+            R.error(AuthRsm.PASSWORD_UNCHANGED);
+        }
+
+        user.setPassword(passwordEncoder.encode(command.getNewPassword()));
+        if (userDao.updateById(user) == 0) {
+            R.error(GenericRsm.UPDATE_FAILED);
+        }
+
+        StpUtil.logout(id);
     }
 }

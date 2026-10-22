@@ -35,10 +35,21 @@ export function StatusTag({ status }: { status: WorkOrderStatus }) {
  * 库里只存 id，是序列化阶段才换成用户对象的，所以这里同时反映着用户服务是否可用：
  * 解析成功显示昵称/用户名，降级（比如 service-auth 停了）则只剩 id —— 而不是报错。
  * 降级时特意把这件事标出来，否则"只有一串数字"看起来像是数据脏了。
+ *
+ * 入参允许 `number`：common 的解析器在降级分支里输出的是裸 id 数字，而不是
+ * `{"id": ...}`。那种情况下雪花 id 可能已经在 JS 里丢了精度，所以只用于展示。
  */
-export function UserCell({ user }: { user: ResolvedUser | null }) {
-  if (!user) {
+export function UserCell({ user }: { user: ResolvedUser | number | null }) {
+  if (user === null || user === undefined) {
     return <Text type="secondary">-</Text>
+  }
+  if (typeof user === 'number') {
+    return (
+      <Space size={4}>
+        <Tag color="warning">已降级</Tag>
+        <Text type="secondary">id={user}</Text>
+      </Space>
+    )
   }
   if (!user.username) {
     return (

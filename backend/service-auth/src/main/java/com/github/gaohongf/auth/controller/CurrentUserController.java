@@ -2,19 +2,25 @@ package com.github.gaohongf.auth.controller;
 
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PostMapping;
+import org.springframework.web.bind.annotation.PutMapping;
+import org.springframework.web.bind.annotation.RequestBody;
 import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RestController;
 
 import com.github.gaohongf.auth.annotation.LoginOnly;
+import com.github.gaohongf.auth.entity.req.ChangeOwnNicknameCommand;
+import com.github.gaohongf.auth.entity.req.ChangeOwnPasswordCommand;
 import com.github.gaohongf.auth.entity.res.CurrentUserRes;
 import com.github.gaohongf.auth.res.UserAuthorities;
 import com.github.gaohongf.auth.rsm.AuthRsm;
 import com.github.gaohongf.auth.service.MenuService;
 import com.github.gaohongf.auth.service.UserService;
+import com.lingyun.base.rsm.GenericRsm;
 import com.lingyun.base.rsm.annotation.ExecutionFailed;
 import com.lingyun.base.rsm.annotation.ExecutionSuccess;
 
 import cn.dev33.satoken.stp.StpUtil;
+import jakarta.validation.Valid;
 import lombok.AllArgsConstructor;
 
 /**
@@ -59,5 +65,30 @@ public class CurrentUserController {
     @PostMapping("/logout")
     public void logout() {
         StpUtil.logout();
+    }
+
+    /**
+     * 修改自己的昵称。
+     * <p>
+     * 用 {@link LoginOnly} 是因为任何登录用户都该能改自己的资料, 不需要额外权限;
+     * 用户 id 只从登录态取, 不接受请求参数, 避免越权改别人的昵称。
+     */
+    @LoginOnly
+    @ExecutionSuccess(GenericRsm.UPDATE_SUCCESS)
+    @ExecutionFailed(GenericRsm.UPDATE_FAILED)
+    @PutMapping("/me/nickname")
+    public void changeOwnNickname(@RequestBody @Valid ChangeOwnNicknameCommand command) {
+        userService.changeOwnNickname(StpUtil.getLoginIdAsLong(), command);
+    }
+
+    /**
+     * 修改自己的密码。旧密码必须正确; 成功后该账号全部会话失效, 需要重新登录。
+     */
+    @LoginOnly
+    @ExecutionSuccess(GenericRsm.UPDATE_SUCCESS)
+    @ExecutionFailed(GenericRsm.UPDATE_FAILED)
+    @PutMapping("/me/password")
+    public void changeOwnPassword(@RequestBody @Valid ChangeOwnPasswordCommand command) {
+        userService.changeOwnPassword(StpUtil.getLoginIdAsLong(), command);
     }
 }
