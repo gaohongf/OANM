@@ -61,6 +61,15 @@ public class WorkOrderRes {
 
     private LocalDateTime createTime;
 
+    /**
+     * 取消申请时间。非 {@code null} 表示有待受理人确认的取消申请。
+     * <p>
+     * 它是一个独立字段而不是新的状态值：状态仍然是 {@code ACCEPTED}，
+     * 界面在状态旁边加一个「取消待确认」标记。这样既不用让所有状态判断都去处理
+     * 一个新枚举，统计口径也不会因为一次待办而改变。
+     */
+    private LocalDateTime cancelRequestedAt;
+
     /** AI 会话 ID，列表里也给出来，方便一眼看出哪些单子是从 AI 对话来的 */
     private String aiConversationId;
 }

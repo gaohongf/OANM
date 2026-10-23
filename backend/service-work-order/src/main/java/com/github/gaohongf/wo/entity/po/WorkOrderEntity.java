@@ -1,5 +1,7 @@
 package com.github.gaohongf.wo.entity.po;
 
+import java.time.LocalDateTime;
+
 import org.apache.ibatis.type.EnumTypeHandler;
 
 import com.baomidou.mybatisplus.annotation.IdType;
@@ -109,9 +111,20 @@ public class WorkOrderEntity extends BaseEntity {
     private Long assigneeId;
 
     /**
-     * 受理人对这个问题的笔记
+     * 受理人对这个问题的笔记。
+     * <p>
+     * 结单时写入"本次心得"；取消流程不碰它。
      */
     private String assigneeNote;
+
+    /**
+     * 取消申请时间。
+     * <p>
+     * {@code null} 表示没有待确认的取消申请。非空时状态仍是 {@link WorkOrderStatus#ACCEPTED}，
+     * 由受理人决定同意（状态改为 {@code CLOSED}）或拒绝（清空这个时间）。刻意不新增一个状态值：
+     * 取消申请不是工单生命周期里的一个阶段，而是"已受理"之上挂起的一次待办。
+     */
+    private LocalDateTime cancelRequestedAt;
 
     /**
      * 此单状态。

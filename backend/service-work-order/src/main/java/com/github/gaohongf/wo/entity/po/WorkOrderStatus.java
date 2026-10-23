@@ -10,9 +10,9 @@ import java.util.Optional;
  * 允许调用方在建单时自报"已解决"是没有任何意义的，只是给状态机开了一个后门。
  *
  * <p>
- * 目前接取/派发会把状态写成 {@link #ACCEPTED}；{@link #RESOLVED} / {@link #CLOSED}
- * 还在等"解决/关闭"的接口。它们先留着，是因为它们定义了这张表的意图，
- * 而 {@code assignee_id} 那两列的存在意义就是服务于这条流水线。
+ * 接取/派发把状态写成 {@link #ACCEPTED}，受理人结单写成 {@link #RESOLVED}，
+ * 取消（没人受理时直接取消，或受理人同意取消申请）写成 {@link #CLOSED}。
+ * 已受理但等待受理人确认的取消申请不改变状态，记录在 {@code cancel_requested_at} 上。
  */
 public enum WorkOrderStatus {
 

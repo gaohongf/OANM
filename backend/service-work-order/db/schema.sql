@@ -51,6 +51,12 @@ CREATE TABLE work_orders
     ai_selected_option_id        INTEGER       NULL,
     assignee_id                  BIGINT        NULL,
     assignee_note                VARCHAR(1000) NULL,
+    /*
+      取消申请时间。NULL = 没有待确认的取消申请。
+      这不是一个状态值: 申请期间状态仍是 ACCEPTED, 受理人同意后状态改为 CLOSED,
+      拒绝则把这个时间清空。
+    */
+    cancel_requested_at          TIMESTAMP     NULL,
     status                       VARCHAR(16)   NOT NULL DEFAULT 'NEW',
 
     create_by                    BIGINT        NULL,
@@ -66,8 +72,10 @@ CREATE TABLE work_orders
 CREATE INDEX idx_work_orders_status ON work_orders (status);
 CREATE INDEX idx_work_orders_conversation ON work_orders (ai_conversation_id);
 
--- "我的工单"按受理人过滤。已经在跑的库不要执行整份脚本(它是 drop/create), 手工补:
+-- "我的工单"按提交人 / 受理人过滤。已经在跑的库不要执行整份脚本(它是 drop/create), 手工补:
+--     CREATE INDEX IF NOT EXISTS idx_work_orders_create_by ON work_orders (create_by);
 --     CREATE INDEX IF NOT EXISTS idx_work_orders_assignee ON work_orders (assignee_id);
+CREATE INDEX idx_work_orders_create_by ON work_orders (create_by);
 CREATE INDEX idx_work_orders_assignee ON work_orders (assignee_id);
 
 COMMENT ON TABLE work_orders IS '运维工单';
@@ -81,7 +89,8 @@ COMMENT ON COLUMN work_orders.solution_detail IS 'AI 给出的解决方法';
 COMMENT ON COLUMN work_orders.ai_conversation_id IS 'AI 会话ID, 指向 spring_ai_chat_memory.conversation_id';
 COMMENT ON COLUMN work_orders.ai_selected_option_id IS '用户在意图推断里选中的选项 id';
 COMMENT ON COLUMN work_orders.assignee_id IS '受理人ID';
-COMMENT ON COLUMN work_orders.assignee_note IS '受理人笔记';
+COMMENT ON COLUMN work_orders.assignee_note IS '受理人结单时填写的本次心得';
+COMMENT ON COLUMN work_orders.cancel_requested_at IS '取消申请时间, NULL-没有待确认的取消申请';
 COMMENT ON COLUMN work_orders.status IS '状态: NEW/ACCEPTED/RESOLVED/CLOSED';
 COMMENT ON COLUMN work_orders.create_by IS '创建人ID';
 COMMENT ON COLUMN work_orders.create_time IS '创建时间';

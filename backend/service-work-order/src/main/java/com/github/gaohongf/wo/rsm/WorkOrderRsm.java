@@ -44,6 +44,14 @@ public class WorkOrderRsm implements RsmManager {
     public static final String WORK_ORDER_STATUS_INVALID = "WorkOrder_WORK_ORDER_STATUS_INVALID";
 
     /**
+     * 列表范围传了不认识的值。
+     * <p>
+     * 与状态筛选同理：忽略非法值会返回全部工单，界面看起来筛选生效了，实际没有。
+     */
+    @RsmInfo(template = "工单范围只能是 all、created 或 assigned", status = HttpStatus.BAD_REQUEST)
+    public static final String WORK_ORDER_SCOPE_INVALID = "WorkOrder_WORK_ORDER_SCOPE_INVALID";
+
+    /**
      * 工单当前状态不允许接取。
      * <p>
      * 只有"待受理且尚未派发"的工单能被接取。文案把这个条件写出来，是因为最常见的误用是
@@ -63,6 +71,59 @@ public class WorkOrderRsm implements RsmManager {
     /** 工单当前状态不允许派发（只有待受理 / 已受理可派发） */
     @RsmInfo(template = "工单当前状态不可派发（仅待受理或已受理的工单可以派发）", status = HttpStatus.BAD_REQUEST)
     public static final String WORK_ORDER_NOT_ASSIGNABLE = "WorkOrder_WORK_ORDER_NOT_ASSIGNABLE";
+
+    /**
+     * 工单当前状态不允许结单。
+     * <p>
+     * 只有已受理的工单可以结单。待受理的单子还没人处理，已解决/已关闭的单子已经是终态。
+     */
+    @RsmInfo(template = "工单当前状态不可结单（仅已受理的工单可以结单）", status = HttpStatus.BAD_REQUEST)
+    public static final String WORK_ORDER_NOT_RESOLVABLE = "WorkOrder_WORK_ORDER_NOT_RESOLVABLE";
+
+    /**
+     * 当前登录人不是这张工单的受理人。
+     * <p>
+     * 用 403 而不是 400：请求本身没问题，是操作者没有这个身份。
+     */
+    @RsmInfo(template = "只有受理人才能结单", status = HttpStatus.FORBIDDEN)
+    public static final String WORK_ORDER_RESOLVE_FORBIDDEN = "WorkOrder_WORK_ORDER_RESOLVE_FORBIDDEN";
+
+    /**
+     * 工单上还有待受理人确认的取消申请。
+     * <p>
+     * 取消申请和结单是两条互斥的出路：先处理取消申请，避免出现"受理人刚结单、
+     * 提单人却以为已经取消了"的状态。
+     */
+    @RsmInfo(template = "工单有待确认的取消申请，请先处理取消申请", status = HttpStatus.CONFLICT)
+    public static final String WORK_ORDER_CANCEL_REQUEST_PENDING =
+            "WorkOrder_WORK_ORDER_CANCEL_REQUEST_PENDING";
+
+    /** 只有提单人本人可以取消自己提交的工单 */
+    @RsmInfo(template = "只有提单人才能取消工单", status = HttpStatus.FORBIDDEN)
+    public static final String WORK_ORDER_CANCEL_FORBIDDEN = "WorkOrder_WORK_ORDER_CANCEL_FORBIDDEN";
+
+    /**
+     * 工单当前状态不允许取消。
+     * <p>
+     * 待受理和已受理可以取消；已解决/已关闭是终态，不再支持取消。
+     */
+    @RsmInfo(template = "工单当前状态不可取消（仅待受理或已受理的工单可以取消）", status = HttpStatus.BAD_REQUEST)
+    public static final String WORK_ORDER_NOT_CANCELABLE = "WorkOrder_WORK_ORDER_NOT_CANCELABLE";
+
+    /** 要处理的取消申请不存在（没申请过，或者已经被处理掉了） */
+    @RsmInfo(template = "工单没有待确认的取消申请", status = HttpStatus.BAD_REQUEST)
+    public static final String WORK_ORDER_CANCEL_REQUEST_ABSENT =
+            "WorkOrder_WORK_ORDER_CANCEL_REQUEST_ABSENT";
+
+    /** 只有当前受理人可以处理取消申请 */
+    @RsmInfo(template = "只有当前受理人可以处理取消申请", status = HttpStatus.FORBIDDEN)
+    public static final String WORK_ORDER_CANCEL_DECISION_FORBIDDEN =
+            "WorkOrder_WORK_ORDER_CANCEL_DECISION_FORBIDDEN";
+
+    /** 处理取消申请时没有明确给出同意或拒绝 */
+    @RsmInfo(template = "请明确选择同意或拒绝这次取消申请", status = HttpStatus.BAD_REQUEST)
+    public static final String WORK_ORDER_CANCEL_DECISION_INVALID =
+            "WorkOrder_WORK_ORDER_CANCEL_DECISION_INVALID";
 
     /**
      * 派发时版本冲突：校验通过后的那一刻，工单被另一个人改了。

@@ -20,6 +20,14 @@ export type WorkOrderPriority = 'LOW' | 'MEDIUM' | 'HIGH' | 'URGENT'
 
 export type WorkOrderStatus = 'NEW' | 'ACCEPTED' | 'RESOLVED' | 'CLOSED'
 
+/**
+ * 「我的工单」的列表范围。
+ *
+ * `created` = 我提交的（按 create_by），`assigned` = 我受理的（按 assignee_id）。
+ * 后端从会话里取当前登录人，前端只传范围，不传用户 id。
+ */
+export type WorkOrderScope = 'created' | 'assigned'
+
 /** 权限键。与后端 `permissions.permission_key` 逐字一致，用于 `<Auth code>`。 */
 export const WORK_ORDER_PERMISSIONS = {
   list: 'GET:/api/ops/work_order',
@@ -27,6 +35,12 @@ export const WORK_ORDER_PERMISSIONS = {
   create: 'POST:/api/ops/work_order',
   claim: 'PUT:/api/ops/work_order/{id}/claim',
   assign: 'PUT:/api/ops/work_order/{id}/assignee',
+  /** 结单。权限之外还要求操作人是当前受理人，由后端校验 */
+  resolve: 'PUT:/api/ops/work_order/{id}/resolve',
+  /** 取消。权限之外还要求操作人是提单人，由后端校验 */
+  cancel: 'PUT:/api/ops/work_order/{id}/cancel',
+  /** 受理人同意/拒绝取消申请 */
+  cancelDecision: 'PUT:/api/ops/work_order/{id}/cancel/approval',
   /** 概览统计。与列表分开授权：能看汇总不等于能看每一单 */
   stats: 'GET:/api/ops/work_order/stats',
 } as const
@@ -148,6 +162,11 @@ export interface WorkOrderRow {
    */
   assigneeId: ResolvedUser | number | null
   createTime: string | null
+  /**
+   * 取消申请时间。非 null 表示工单已被受理、提单人申请取消，等待受理人确认。
+   * 状态此时仍是 `ACCEPTED`，所以待确认标记要看这个字段，不能只看 status。
+   */
+  cancelRequestedAt: string | null
   aiConversationId: string | null
 }
 
@@ -198,9 +217,9 @@ export interface RecentWorkOrder {
 /**
  * 概览统计。
  *
- * `resolved` / `closed` 目前没有接口能写入（解决/关闭流程还没做），所以它们
- * 通常是 0；`todayCompleted` 和 `daily[].completed` 是"已解决/已关闭单据的
- * update_time 落在该时间窗内"的近似值。界面如实展示，不补假数据。
+ * `resolved` 由「结单」写入；`closed` 目前还没有流程写入，通常是 0。
+ * `todayCompleted` 和 `daily[].completed` 是"已解决/已关闭单据的 update_time
+ * 落在该时间窗内"的近似值。界面如实展示，不补假数据。
  */
 export interface WorkOrderStats {
   total: number
@@ -222,8 +241,8 @@ export interface ListWorkOrderParams {
   /** 按标题/描述模糊匹配 */
   keyword?: string
   status?: WorkOrderStatus
-  /** true 时只看当前登录人名下的工单。用户 id 由后端从会话里取，前端不传 */
-  mine?: boolean
+  /** 只看当前登录人的某类工单。用户 id 由后端从会话里取，前端不传 */
+  scope?: WorkOrderScope
 }
 
 // ---- 接口 ----
@@ -235,7 +254,7 @@ export function listWorkOrders(params: ListWorkOrderParams): Promise<PageResult<
       size: params.size,
       keyword: params.keyword,
       status: params.status,
-      mine: params.mine ? 'true' : undefined,
+      scope: params.scope,
     },
   })
 }
@@ -263,6 +282,41 @@ export function assignWorkOrder(id: string, assigneeId: string): Promise<void> {
   return request<void>(`/api/ops/work_order/${id}/assignee`, {
     method: 'PUT',
     body: { assigneeId },
+  })
+}
+
+/**
+ * 结单。只有当前受理人可以调用，状态会变为 `RESOLVED`。
+ *
+ * `note` 是选填的本次心得。没填时发送空对象，后端把 `null` 当作“没有心得”。
+ */
+export function resolveWorkOrder(id: string, note?: string): Promise<void> {
+  const text = note?.trim()
+  return request<void>(`/api/ops/work_order/${id}/resolve`, {
+    method: 'PUT',
+    body: text ? { note: text } : {},
+  })
+}
+
+/**
+ * 取消工单，只能由提单人调用。
+ *
+ * 没人受理时后端直接把状态改为 `CLOSED`；已受理时只写入取消申请并通知受理人。前端不需要
+ * 告诉后端走哪条路 —— 状态和受理人由后端读，避免前端判断与服务端规则漂移。
+ */
+export function cancelWorkOrder(id: string): Promise<void> {
+  return request<void>(`/api/ops/work_order/${id}/cancel`, { method: 'PUT' })
+}
+
+/**
+ * 受理人处理取消申请。
+ *
+ * `approved=true` 同意并把工单状态改为 `CLOSED`；`false` 拒绝并清空申请。
+ */
+export function decideCancelWorkOrder(id: string, approved: boolean): Promise<void> {
+  return request<void>(`/api/ops/work_order/${id}/cancel/approval`, {
+    method: 'PUT',
+    body: { approved },
   })
 }
 

@@ -2,8 +2,7 @@
 -- service-message 引导数据
 -- 数据库: PostgreSQL 18
 --
--- 现在只需要一条模板: 工单创建后通知超管的那条。其余模板随"谁要发通知"一起加,
--- 不预先造假模板 —— 没人用的模板行会让人以为某个功能已经接好了。
+-- 模板随实际通知链路增加, 不预先造假模板 —— 没人用的模板行会让人以为某个功能已经接好了。
 --
 -- 本脚本可以重复执行（幂等）。
 --
@@ -76,3 +75,64 @@ SET content_template = '工单「{title}」已派发给您（类型: {typeLabel}
 WHERE template_key = 'work_order.assigned'
   AND channel = 'APP'
   AND content_template <> '工单「{title}」已派发给您（类型: {typeLabel}），请及时处理。';
+
+-- ------------------------------------------------------------
+-- 取消申请与处理结果(站内信)
+--
+-- 参数由 service-work-order 传, 三个模板都只用 {title}:
+--   work_order.cancel_requested —— 提单人申请取消, 发给当前受理人
+--   work_order.cancel_approved  —— 受理人同意, 发给提单人(工单已关闭)
+--   work_order.cancel_rejected  —— 受理人拒绝, 发给提单人(工单继续处理)
+--
+-- 判重方式与上面一致: (template_key, channel)。
+-- ------------------------------------------------------------
+INSERT INTO message_templates (id, template_key, channel, title_template, content_template,
+                               enabled, remark, create_time, update_time, deleted, version)
+SELECT -3, 'work_order.cancel_requested', 'APP', '取消申请',
+       '工单「{title}」的提交人申请取消，请确认是否同意。',
+       1, '提单人取消已受理工单时通知受理人', NOW(), NOW(), 0, 0
+WHERE NOT EXISTS (SELECT 1
+                  FROM message_templates
+                  WHERE template_key = 'work_order.cancel_requested'
+                    AND channel = 'APP');
+
+UPDATE message_templates
+SET content_template = '工单「{title}」的提交人申请取消，请确认是否同意。',
+    update_time      = NOW()
+WHERE template_key = 'work_order.cancel_requested'
+  AND channel = 'APP'
+  AND content_template <> '工单「{title}」的提交人申请取消，请确认是否同意。';
+
+INSERT INTO message_templates (id, template_key, channel, title_template, content_template,
+                               enabled, remark, create_time, update_time, deleted, version)
+SELECT -4, 'work_order.cancel_approved', 'APP', '取消已通过',
+       '工单「{title}」的取消申请已通过，工单已关闭。',
+       1, '受理人同意取消后通知提单人', NOW(), NOW(), 0, 0
+WHERE NOT EXISTS (SELECT 1
+                  FROM message_templates
+                  WHERE template_key = 'work_order.cancel_approved'
+                    AND channel = 'APP');
+
+UPDATE message_templates
+SET content_template = '工单「{title}」的取消申请已通过，工单已关闭。',
+    update_time      = NOW()
+WHERE template_key = 'work_order.cancel_approved'
+  AND channel = 'APP'
+  AND content_template <> '工单「{title}」的取消申请已通过，工单已关闭。';
+
+INSERT INTO message_templates (id, template_key, channel, title_template, content_template,
+                               enabled, remark, create_time, update_time, deleted, version)
+SELECT -5, 'work_order.cancel_rejected', 'APP', '取消被拒绝',
+       '工单「{title}」的取消申请被受理人拒绝，工单将继续处理。',
+       1, '受理人拒绝取消后通知提单人', NOW(), NOW(), 0, 0
+WHERE NOT EXISTS (SELECT 1
+                  FROM message_templates
+                  WHERE template_key = 'work_order.cancel_rejected'
+                    AND channel = 'APP');
+
+UPDATE message_templates
+SET content_template = '工单「{title}」的取消申请被受理人拒绝，工单将继续处理。',
+    update_time      = NOW()
+WHERE template_key = 'work_order.cancel_rejected'
+  AND channel = 'APP'
+  AND content_template <> '工单「{title}」的取消申请被受理人拒绝，工单将继续处理。';

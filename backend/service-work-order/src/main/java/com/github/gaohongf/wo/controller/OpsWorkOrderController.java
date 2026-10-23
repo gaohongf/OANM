@@ -11,6 +11,8 @@ import org.springframework.web.bind.annotation.RestController;
 
 import com.github.gaohongf.model.PageRes;
 import com.github.gaohongf.wo.entity.req.AssignWorkOrderCommand;
+import com.github.gaohongf.wo.entity.req.DecideCancelWorkOrderCommand;
+import com.github.gaohongf.wo.entity.req.ResolveWorkOrderCommand;
 import com.github.gaohongf.wo.entity.req.SubmitWorkOrderCommand;
 import com.github.gaohongf.wo.entity.res.WorkOrderCreatedRes;
 import com.github.gaohongf.wo.entity.res.WorkOrderDetailRes;
@@ -39,13 +41,16 @@ import lombok.AllArgsConstructor;
  * {@code solution_detail} 是模型生成的正文，可能上千字，列表带出来就是成倍的
  * 无用载荷，而它只在抽屉打开时才需要。
  *
- * <h2>接取、派发与统计的权限键</h2>
+ * <h2>流转与统计的权限键</h2>
  * <ul>
  *   <li>{@code PUT:/api/ops/work_order/{id}/claim} —— 主动接取；</li>
  *   <li>{@code PUT:/api/ops/work_order/{id}/assignee} —— 派发/改派；</li>
+ *   <li>{@code PUT:/api/ops/work_order/{id}/resolve} —— 结单；</li>
+ *   <li>{@code PUT:/api/ops/work_order/{id}/cancel} —— 取消（没人受理时直接取消，否则发起申请）；</li>
+ *   <li>{@code PUT:/api/ops/work_order/{id}/cancel/approval} —— 受理人同意/拒绝取消申请；</li>
  *   <li>{@code GET:/api/ops/work_order/stats} —— 概览统计。</li>
  * </ul>
- * 三者都由启动时的接口扫描自动登记，非超级管理员角色要在角色管理里显式授权。
+ * 这些写端点都由启动时的接口扫描自动登记，非超级管理员角色要在角色管理里显式授权。
  * 派发候选人 = 持有接取权限的人，所以给运维授权接取之后，他们才会出现在派发下拉里。
  * 概览统计单独一个键，是为了让"能看汇总"和"能看每一单"可以分开授权。
  */
@@ -59,6 +64,14 @@ public class OpsWorkOrderController {
     /**
      * 分页列表。
      * <p>
+     * {@code scope} 用来支撑「我的工单」：
+     * <ul>
+     *   <li>{@code all}（默认）—— 全部工单；</li>
+     *   <li>{@code created} —— 当前登录人提交的工单；</li>
+     *   <li>{@code assigned} —— 当前登录人受理的工单。</li>
+     * </ul>
+     * 登录人由服务端从会话里取，不接受前端传用户 id。
+     * <p>
      * 只有写操作才需要那句"创建成功"。
      */
     @GetMapping
@@ -69,8 +82,8 @@ public class OpsWorkOrderController {
             @RequestParam(name = "size", defaultValue = "10") long size,
             @RequestParam(name = "keyword", required = false) String keyword,
             @RequestParam(name = "status", required = false) String status,
-            @RequestParam(name = "mine", defaultValue = "false") boolean mine) {
-        return workOrderService.page(current, size, keyword, status, mine);
+            @RequestParam(name = "scope", defaultValue = "all") String scope) {
+        return workOrderService.page(current, size, keyword, status, scope);
     }
 
     /**
@@ -134,5 +147,50 @@ public class OpsWorkOrderController {
     public void assign(@PathVariable("id") Long id,
                        @RequestBody @Valid AssignWorkOrderCommand command) {
         workOrderService.assign(id, command);
+    }
+
+    /**
+     * 结单。
+     * <p>
+     * 只有当前受理人可以把已受理的工单推进到「已解决」。请求体可以省略 —— 心得是选填的，
+     * 前端不填时不必为了一个空字段硬造一个 JSON 对象。
+     * <p>
+     * 工单上如果有待确认的取消申请，这里会被拒绝：先处理取消，避免结单和取消同时发生。
+     */
+    @ExecutionSuccess(GenericRsm.UPDATE_SUCCESS)
+    @ExecutionFailed(GenericRsm.UPDATE_FAILED)
+    @PutMapping("/{id}/resolve")
+    public void resolve(@PathVariable("id") Long id,
+                        @RequestBody(required = false) @Valid ResolveWorkOrderCommand command) {
+        workOrderService.resolve(id, command);
+    }
+
+    /**
+     * 取消工单，只能由提单人发起。
+     * <p>
+     * 没人受理（待受理、没有受理人）时直接关闭；已被受理时只写入取消申请并通知
+     * 当前受理人，状态仍是「已受理」，等受理人通过 {@code /cancel/approval} 处理。
+     * <p>
+     * 不提供请求体：取消的发起人由登录态决定，前端传不了、也不需要传。
+     */
+    @ExecutionSuccess(GenericRsm.UPDATE_SUCCESS)
+    @ExecutionFailed(GenericRsm.UPDATE_FAILED)
+    @PutMapping("/{id}/cancel")
+    public void cancel(@PathVariable("id") Long id) {
+        workOrderService.cancel(id);
+    }
+
+    /**
+     * 处理取消申请，只能由当前受理人调用。
+     * <p>
+     * {@code approved=true} 同意并关闭工单（状态变为 {@code CLOSED}）；{@code false} 拒绝并清空申请时间。
+     * 无论哪种结果都会给提单人发一条站内信。
+     */
+    @ExecutionSuccess(GenericRsm.UPDATE_SUCCESS)
+    @ExecutionFailed(GenericRsm.UPDATE_FAILED)
+    @PutMapping("/{id}/cancel/approval")
+    public void decideCancel(@PathVariable("id") Long id,
+                             @RequestBody DecideCancelWorkOrderCommand command) {
+        workOrderService.decideCancel(id, command);
     }
 }

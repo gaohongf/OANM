@@ -31,8 +31,9 @@ public class WorkOrderDetailRes extends WorkOrderRes {
     private Integer aiSelectedOptionId;
 
     /**
-     * 受理人笔记。受理人 id 在父类 {@link WorkOrderRes#getAssigneeId()} 上（带 {@code @User}）。
+     * 受理人结单时填写的本次心得，没有填时为 {@code null}。
      * <p>
+     * 受理人 id 在父类 {@link WorkOrderRes#getAssigneeId()} 上（带 {@code @User}）。
      * 这里刻意不再声明 {@code assigneeId}: 子类同名属性会遮蔽父类字段, MapStruct 会按
      * {@code Long -> String} 映射, 于是 {@code @User} 的解析被绕过, 详情和列表返回两种形状。
      */

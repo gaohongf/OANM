@@ -126,6 +126,12 @@ export default function IntentInference() {
   const scrollRef = useRef<HTMLDivElement | null>(null)
   /** 上一帧的轮次数，用来判断"是不是用户刚发了新消息"（见下面的滚动 effect） */
   const lastRoundCount = useRef(0)
+  /**
+   * 下一次渲染后强制滚到底，一次性标记。
+   * 用户点「生成工单」是一个明确的动作，不管他此刻是不是翻在上面看选项，
+   * 都应该把新出现的工单气泡带进视野 —— 否则要手动往下滚一节才开始生成。
+   */
+  const forceScrollRef = useRef(false)
 
   const generating = draft.workOrder?.status === 'generating'
   /**
@@ -169,7 +175,13 @@ export default function IntentInference() {
     }
     const grew = draft.rounds.length !== lastRoundCount.current
     lastRoundCount.current = draft.rounds.length
-    if (!grew && el.scrollHeight - el.scrollTop - el.clientHeight > 160) {
+
+    // 点「生成工单」后的这一帧无条件跟随：工单气泡出现在所有轮次之后，
+    // 用户可能正停在选项上方，此时按"是否贴着底部"判断会把他留在原地。
+    const force = forceScrollRef.current
+    forceScrollRef.current = false
+
+    if (!force && !grew && el.scrollHeight - el.scrollTop - el.clientHeight > 160) {
       return
     }
     el.scrollTop = el.scrollHeight
@@ -285,6 +297,10 @@ export default function IntentInference() {
     generationAbortRef.current = controller
     const conversationId = draft.conversationId
     const { roundIndex, option } = selected
+
+    // 让滚动 effect 在这一帧忽略"用户是否贴着底部"：生成是用户主动点的，
+    // 工单气泡必须立即出现在视野里。
+    forceScrollRef.current = true
 
     setDraft((prev) => ({
       ...prev,
@@ -785,7 +801,12 @@ export default function IntentInference() {
           disabled={busy}
           onClick={onGenerate}
         >
-          生成工单（#{selectedHere.id} {selectedHere.title}）
+          {generating
+            ? '正在生成…'
+            : draft.workOrder !== null && draft.workOrder.optionId === selectedHere.id
+              ? // 这张单已经按当前选项生成过，再点就是换一版，而不是第一次生成
+                '不满意？再生成一次'
+              : `生成工单（#${selectedHere.id} ${selectedHere.title}）`}
         </Button>
       )}
 

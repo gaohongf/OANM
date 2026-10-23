@@ -99,6 +99,12 @@ INSERT INTO permissions (id, permission_key, label, create_time, update_time, de
 SELECT -7, 'GET:/api/auth/api-routes', '查看路由', NOW(), NOW(), 0, 0
 WHERE NOT EXISTS (SELECT 1 FROM permissions WHERE permission_key = 'GET:/api/auth/api-routes');
 
+-- 「我的工单」只做列表查询，所以挂列表权限而不是详情权限：
+-- 有列表权限的人才能进这个页面，具体某一单能不能看详情仍由详情接口单独把关。
+INSERT INTO permissions (id, permission_key, label, create_time, update_time, deleted, version)
+SELECT -9, 'GET:/api/ops/work_order', '查看工单列表', NOW(), NOW(), 0, 0
+WHERE NOT EXISTS (SELECT 1 FROM permissions WHERE permission_key = 'GET:/api/ops/work_order');
+
 -- 4.2 顶级节点
 INSERT INTO menus (id, parent_id, name, path, component, icon, sort, hidden, keep_alive, permission_id, enabled, locked, source, create_time, update_time, deleted, version)
 SELECT -10, NULL, '概览', '/dashboard', 'Dashboard', 'dashboard', 1, FALSE, FALSE, NULL, TRUE, FALSE, 'MANUAL', NOW(), NOW(), 0, 0
@@ -119,6 +125,13 @@ SELECT -21, -20, '工单管理', '/ops/work-order', 'ops/WorkOrder', 'file', 1, 
        (SELECT id FROM permissions WHERE permission_key = 'GET:/api/ops/work_order/{id}'),
        TRUE, FALSE, 'MANUAL', NOW(), NOW(), 0, 0
 WHERE NOT EXISTS (SELECT 1 FROM menus WHERE id = -21);
+
+-- 「我的工单」和「工单管理」是两个入口：前者按提交人/受理人过滤，后者看全部。
+INSERT INTO menus (id, parent_id, name, path, component, icon, sort, hidden, keep_alive, permission_id, enabled, locked, source, create_time, update_time, deleted, version)
+SELECT -24, -20, '我的工单', '/ops/my-work-order', 'ops/MyWorkOrder', 'file-done', 2, FALSE, TRUE,
+       (SELECT id FROM permissions WHERE permission_key = 'GET:/api/ops/work_order'),
+       TRUE, FALSE, 'MANUAL', NOW(), NOW(), 0, 0
+WHERE NOT EXISTS (SELECT 1 FROM menus WHERE id = -24);
 
 INSERT INTO menus (id, parent_id, name, path, component, icon, sort, hidden, keep_alive, permission_id, enabled, locked, source, create_time, update_time, deleted, version)
 SELECT -31, -30, '菜单管理', '/system/menus', 'system/MenuList', 'appstore', 1, FALSE, FALSE,
@@ -179,10 +192,15 @@ WHERE NOT EXISTS (SELECT 1 FROM permissions WHERE permission_key = 'GET:/api/ai/
 -- 6.2 菜单。component 必须与前端 src/pages/ 下的文件路径逐字一致(大小写敏感):
 --     src/pages/ops/IntentInference.tsx → 'ops/IntentInference'
 INSERT INTO menus (id, parent_id, name, path, component, icon, sort, hidden, keep_alive, permission_id, enabled, locked, source, create_time, update_time, deleted, version)
-SELECT -22, -20, '智能提单', '/ops/ai/intent', 'ops/IntentInference', 'robot', 2, FALSE, FALSE,
+SELECT -22, -20, '智能提单', '/ops/ai/intent', 'ops/IntentInference', 'robot', 3, FALSE, FALSE,
        (SELECT id FROM permissions WHERE permission_key = 'GET:/api/ai/assistant/wo/uiii'),
        TRUE, FALSE, 'MANUAL', NOW(), NOW(), 0, 0
 WHERE NOT EXISTS (SELECT 1 FROM menus WHERE id = -22);
+
+-- 已有库里这一行还停在 sort=2，和新加的「我的工单」撞序。只在它仍是旧默认值时修正，
+-- 不覆盖管理员后来手工调过的顺序。
+UPDATE menus SET sort = 3, update_time = NOW()
+WHERE id = -22 AND sort = 2;
 
 -- 6.3 清理已经删掉的「AI 辅助填单」页。
 --

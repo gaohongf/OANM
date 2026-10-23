@@ -15,8 +15,9 @@ import lombok.Data;
  * <h2>"已完成"的口径</h2>
  * 目前没有单独的"完成时间"字段，{@link #todayCompleted} 和
  * {@link DailyCountRes#getCompleted()} 用的是<b>状态为已解决/已关闭的单据的
- * {@code update_time}</b>。在"解决/关闭"接口做出来之前，这是唯一可用的近似值；
- * 之后再补 {@code resolved_time} 才能做到精确。这里不把它伪装成精确值。
+ * {@code update_time}</b>。结单写入 {@code RESOLVED}，取消写入 {@code CLOSED}，
+ * 但 {@code update_time} 也可能被后续操作刷新；之后再补
+ * {@code resolved_time} 才能做到精确。这里不把它伪装成精确值。
  */
 @Data
 public class WorkOrderStatsRes {

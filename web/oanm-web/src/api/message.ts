@@ -134,6 +134,18 @@ export function resolveNotificationTarget(item: NotificationItem): string | null
   if ((item.type === 'work_order.created' || item.type === 'work_order.assigned') && item.bizId) {
     return `/ops/work-order?openId=${encodeURIComponent(item.bizId)}`
   }
+  // 取消申请只可能发给受理人，落到「我的工单 / 我受理的」并直接打开详情；
+  // 拒绝结果发给提单人，落到「我提交的」。
+  if (item.type === 'work_order.cancel_requested' && item.bizId) {
+    return `/ops/my-work-order?scope=assigned&openId=${encodeURIComponent(item.bizId)}`
+  }
+  if (item.type === 'work_order.cancel_rejected' && item.bizId) {
+    return `/ops/my-work-order?scope=created&openId=${encodeURIComponent(item.bizId)}`
+  }
+  // 同意取消后工单仍然存在，只是状态变为「已关闭」，所以同样可以打开详情。
+  if (item.type === 'work_order.cancel_approved' && item.bizId) {
+    return `/ops/my-work-order?scope=created&openId=${encodeURIComponent(item.bizId)}`
+  }
   return null
 }
 

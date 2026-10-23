@@ -17,6 +17,7 @@ import org.springframework.util.StringUtils;
 
 import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
 import com.baomidou.mybatisplus.core.conditions.query.QueryWrapper;
+import com.baomidou.mybatisplus.core.conditions.update.LambdaUpdateWrapper;
 import com.baomidou.mybatisplus.core.metadata.IPage;
 import com.baomidou.mybatisplus.core.toolkit.Wrappers;
 import com.baomidou.mybatisplus.extension.plugins.pagination.Page;
@@ -30,6 +31,8 @@ import com.github.gaohongf.wo.dao.WorkOrderDao;
 import com.github.gaohongf.wo.entity.po.WorkOrderEntity;
 import com.github.gaohongf.wo.entity.po.WorkOrderStatus;
 import com.github.gaohongf.wo.entity.req.AssignWorkOrderCommand;
+import com.github.gaohongf.wo.entity.req.DecideCancelWorkOrderCommand;
+import com.github.gaohongf.wo.entity.req.ResolveWorkOrderCommand;
 import com.github.gaohongf.wo.entity.req.SubmitWorkOrderCommand;
 import com.github.gaohongf.wo.entity.res.DailyCountRes;
 import com.github.gaohongf.wo.entity.res.RecentWorkOrderRes;
@@ -38,6 +41,8 @@ import com.github.gaohongf.wo.entity.res.WorkOrderRes;
 import com.github.gaohongf.wo.entity.res.WorkOrderStatsRes;
 import com.github.gaohongf.wo.mapstruct.WorkOrderConverter;
 import com.github.gaohongf.wo.mq.WorkOrderAssignedEvent;
+import com.github.gaohongf.wo.mq.WorkOrderCancelDecidedEvent;
+import com.github.gaohongf.wo.mq.WorkOrderCancelRequestedEvent;
 import com.github.gaohongf.wo.mq.WorkOrderCreatedEvent;
 import com.github.gaohongf.wo.rsm.WorkOrderRsm;
 import com.github.gaohongf.wo.service.WorkOrderService;
@@ -71,10 +76,11 @@ public class WorkOrderServiceImpl implements WorkOrderService {
     private final UserClient userClient;
 
     @Override
-    public PageRes<WorkOrderRes> page(long current, long size, String keyword, String status, boolean mine) {
+    public PageRes<WorkOrderRes> page(long current, long size, String keyword, String status, String scope) {
         long safeCurrent = PageRes.clampCurrent(current);
         long safeSize = PageRes.clampSize(size);
         WorkOrderStatus statusValue = parseStatus(status);
+        ListScope listScope = parseScope(scope);
 
         LambdaQueryWrapper<WorkOrderEntity> wrapper = Wrappers.<WorkOrderEntity>lambdaQuery()
                 .eq(statusValue != null, WorkOrderEntity::getStatus, statusValue)
@@ -83,10 +89,15 @@ public class WorkOrderServiceImpl implements WorkOrderService {
                         .or()
                         .like(WorkOrderEntity::getProblemDescription, keyword));
 
-        if (mine) {
+        if (listScope != null) {
             // 登录人由服务端取, 不接受前端传 user id —— 否则"我的工单"可以变成"查别人的工单"。
-            // 不写成 eq(mine, ...) 是因为方法引用的参数会被提前求值, mine=false 时也会调一次 StpUtil。
-            wrapper.eq(WorkOrderEntity::getAssigneeId, StpUtil.getLoginIdAsLong());
+            // 只在真的要按人过滤时才取登录态, all 范围不会白调一次 StpUtil。
+            Long userId = StpUtil.getLoginIdAsLong();
+            if (listScope == ListScope.CREATED) {
+                wrapper.eq(WorkOrderEntity::getCreateBy, userId);
+            } else {
+                wrapper.eq(WorkOrderEntity::getAssigneeId, userId);
+            }
         }
 
         // 新的在前 —— 与 PermissionServiceImpl 的升序相反, 这是有意的:
@@ -146,6 +157,11 @@ public class WorkOrderServiceImpl implements WorkOrderService {
         if (status == WorkOrderStatus.ACCEPTED && assigneeId.equals(current.getAssigneeId())) {
             return;
         }
+        // 取消申请是发给当前受理人的，换人之后这次申请就没有明确的处理人了。
+        // 要么由当前受理人先同意/拒绝，要么由管理员撤掉申请后再改派（当前没有撤掉入口）。
+        if (current.getCancelRequestedAt() != null) {
+            R.error(WorkOrderRsm.WORK_ORDER_CANCEL_REQUEST_PENDING);
+        }
 
         // 远程校验放在更新之前、事务之外: 失败时库里什么都没动, 重试是安全的。
         validateAssignee(assigneeId);
@@ -170,6 +186,233 @@ public class WorkOrderServiceImpl implements WorkOrderService {
         // 版本号不等拦截器回写实体, 直接用"读到的版本 + 1": 与乐观锁的成功条件完全等价。
         eventPublisher.publishEvent(new WorkOrderAssignedEvent(id, current.getTitle(),
                 current.getType(), assigneeId, operatorId, currentVersion + 1));
+    }
+
+    @Override
+    public void resolve(Long id, ResolveWorkOrderCommand command) {
+        Long userId = StpUtil.getLoginIdAsLong();
+
+        WorkOrderEntity current = workOrderDao.selectById(id);
+        if (current == null) {
+            R.error(WorkOrderRsm.WORK_ORDER_NOT_FOUND);
+        }
+        assertResolvable(current, userId);
+
+        int currentVersion = current.getVersion() == null ? 0 : current.getVersion();
+        WorkOrderEntity patch = new WorkOrderEntity();
+        // 同 claim/assign: 版本为 null 时乐观锁拦截器会跳过, 条件更新就不再是原子的
+        patch.setVersion(currentVersion);
+        patch.setStatus(WorkOrderStatus.RESOLVED);
+        // 空心得归一成 null; 非空才进入 UPDATE 的 SET 子句
+        patch.setAssigneeNote(trimToNull(command == null ? null : command.getNote()));
+
+        // 状态/受理人/取消申请三个条件与版本条件一起构成原子更新:
+        // 在读和写之间被改派、被结单、或被发起取消申请, 都会落到 0 行。
+        int rows = workOrderDao.update(patch, Wrappers.<WorkOrderEntity>lambdaUpdate()
+                .eq(WorkOrderEntity::getId, id)
+                .eq(WorkOrderEntity::getStatus, WorkOrderStatus.ACCEPTED)
+                .eq(WorkOrderEntity::getAssigneeId, userId)
+                .isNull(WorkOrderEntity::getCancelRequestedAt));
+        if (rows == 0) {
+            WorkOrderEntity latest = workOrderDao.selectById(id);
+            if (latest == null) {
+                R.error(WorkOrderRsm.WORK_ORDER_NOT_FOUND);
+            }
+            // 重查一次, 把"状态变了 / 换人了 / 来了取消申请 / 只是版本冲突"分开报,
+            // 而不是让所有并发情况都显示一句"请刷新"。
+            assertResolvable(latest, userId);
+            R.error(WorkOrderRsm.WORK_ORDER_CONCURRENT_MODIFIED);
+        }
+    }
+
+    /**
+     * 结单的前置条件。读后写失败时会用最新快照再跑一次，所以这里只依赖传入的快照。
+     */
+    private static void assertResolvable(WorkOrderEntity order, Long operatorId) {
+        if (order.getStatus() != WorkOrderStatus.ACCEPTED) {
+            R.error(WorkOrderRsm.WORK_ORDER_NOT_RESOLVABLE);
+        }
+        if (!operatorId.equals(order.getAssigneeId())) {
+            R.error(WorkOrderRsm.WORK_ORDER_RESOLVE_FORBIDDEN);
+        }
+        if (order.getCancelRequestedAt() != null) {
+            R.error(WorkOrderRsm.WORK_ORDER_CANCEL_REQUEST_PENDING);
+        }
+    }
+
+    @Override
+    public void cancel(Long id) {
+        Long userId = StpUtil.getLoginIdAsLong();
+
+        WorkOrderEntity current = workOrderDao.selectById(id);
+        if (current == null) {
+            R.error(WorkOrderRsm.WORK_ORDER_NOT_FOUND);
+        }
+        // 取消是提单人的权利, 不是管理员的权利: 管理员要处理别人的单子, 应当走派发/结单,
+        // 而不是替提单人把单子关掉。
+        if (!userId.equals(current.getCreateBy())) {
+            R.error(WorkOrderRsm.WORK_ORDER_CANCEL_FORBIDDEN);
+        }
+
+        WorkOrderStatus status = current.getStatus();
+        if (status != WorkOrderStatus.NEW && status != WorkOrderStatus.ACCEPTED) {
+            R.error(WorkOrderRsm.WORK_ORDER_NOT_CANCELABLE);
+        }
+
+        int currentVersion = current.getVersion() == null ? 0 : current.getVersion();
+
+        // 没人受理, 或者提单人自己就是受理人: 不需要别人同意, 直接关闭。
+        // ACCEPTED 却没有受理人是历史脏数据, 也按"没人受理"处理, 否则这张单会卡在
+        // 一个既不能结单、也没有人能同意取消的状态。
+        if (status == WorkOrderStatus.NEW
+                || current.getAssigneeId() == null
+                || userId.equals(current.getAssigneeId())) {
+            closeDirectly(id, current, userId, currentVersion);
+            return;
+        }
+        // 已经申请过: 幂等返回。重复点击不应该产生第二条通知, 也不应该报错。
+        if (current.getCancelRequestedAt() != null) {
+            return;
+        }
+
+        WorkOrderEntity patch = new WorkOrderEntity();
+        patch.setVersion(currentVersion);
+        patch.setCancelRequestedAt(LocalDateTime.now());
+
+        // 条件更新: 只有"仍由同一个受理人持有、且还没有取消申请"时才写入。
+        // 这样两个人同时申请时只有一个人能落库, 也就只发一条通知。
+        int rows = workOrderDao.update(patch, Wrappers.<WorkOrderEntity>lambdaUpdate()
+                .eq(WorkOrderEntity::getId, id)
+                .eq(WorkOrderEntity::getStatus, WorkOrderStatus.ACCEPTED)
+                .eq(WorkOrderEntity::getAssigneeId, current.getAssigneeId())
+                .isNull(WorkOrderEntity::getCancelRequestedAt));
+        if (rows == 0) {
+            WorkOrderEntity latest = workOrderDao.selectById(id);
+            if (latest == null) {
+                R.error(WorkOrderRsm.WORK_ORDER_NOT_FOUND);
+            }
+            // 并发请求已经写入了同一条申请, 对调用方来说仍然是成功。
+            if (latest.getCancelRequestedAt() != null) {
+                return;
+            }
+            R.error(WorkOrderRsm.WORK_ORDER_CONCURRENT_MODIFIED);
+        }
+
+        eventPublisher.publishEvent(new WorkOrderCancelRequestedEvent(id, current.getTitle(),
+                userId, current.getAssigneeId(), currentVersion + 1));
+    }
+
+    @Override
+    public void decideCancel(Long id, DecideCancelWorkOrderCommand command) {
+        if (command == null || command.getApproved() == null) {
+            R.error(WorkOrderRsm.WORK_ORDER_CANCEL_DECISION_INVALID);
+        }
+        boolean approved = command.getApproved();
+        Long userId = StpUtil.getLoginIdAsLong();
+
+        WorkOrderEntity current = workOrderDao.selectById(id);
+        if (current == null) {
+            R.error(WorkOrderRsm.WORK_ORDER_NOT_FOUND);
+        }
+        if (current.getStatus() != WorkOrderStatus.ACCEPTED || current.getCancelRequestedAt() == null) {
+            R.error(WorkOrderRsm.WORK_ORDER_CANCEL_REQUEST_ABSENT);
+        }
+        if (!userId.equals(current.getAssigneeId())) {
+            R.error(WorkOrderRsm.WORK_ORDER_CANCEL_DECISION_FORBIDDEN);
+        }
+
+        int currentVersion = current.getVersion() == null ? 0 : current.getVersion();
+        if (approved) {
+            // 同意 = 状态切到已关闭，并清掉申请时间。清时间是为了让已关闭的单子
+            // 不再带着"取消待确认"的标记；null 只能通过 wrapper 的 SET 写入。
+            int rows = workOrderDao.update(null, Wrappers.<WorkOrderEntity>lambdaUpdate()
+                    .eq(WorkOrderEntity::getId, id)
+                    .eq(WorkOrderEntity::getStatus, WorkOrderStatus.ACCEPTED)
+                    .eq(WorkOrderEntity::getAssigneeId, userId)
+                    .isNotNull(WorkOrderEntity::getCancelRequestedAt)
+                    .eq(WorkOrderEntity::getVersion, currentVersion)
+                    .set(WorkOrderEntity::getStatus, WorkOrderStatus.CLOSED)
+                    .set(WorkOrderEntity::getCancelRequestedAt, null)
+                    .set(WorkOrderEntity::getUpdateBy, userId)
+                    .set(WorkOrderEntity::getUpdateTime, LocalDateTime.now())
+                    .set(WorkOrderEntity::getVersion, currentVersion + 1));
+            if (rows == 0) {
+                reportDecisionConflict(id, userId);
+            }
+        } else {
+            // 拒绝 = 清空申请时间。这里不能用 updateById: 实体上的 null 会被
+            // MyBatis-Plus 的默认字段策略忽略, 申请时间会一直挂着。
+            int rows = workOrderDao.update(null, Wrappers.<WorkOrderEntity>lambdaUpdate()
+                    .eq(WorkOrderEntity::getId, id)
+                    .eq(WorkOrderEntity::getStatus, WorkOrderStatus.ACCEPTED)
+                    .eq(WorkOrderEntity::getAssigneeId, userId)
+                    .isNotNull(WorkOrderEntity::getCancelRequestedAt)
+                    .eq(WorkOrderEntity::getVersion, currentVersion)
+                    .set(WorkOrderEntity::getCancelRequestedAt, null)
+                    .set(WorkOrderEntity::getUpdateBy, userId)
+                    .set(WorkOrderEntity::getUpdateTime, LocalDateTime.now())
+                    .set(WorkOrderEntity::getVersion, currentVersion + 1));
+            if (rows == 0) {
+                reportDecisionConflict(id, userId);
+            }
+        }
+
+        eventPublisher.publishEvent(new WorkOrderCancelDecidedEvent(id, current.getTitle(),
+                current.getCreateBy(), userId, approved, currentVersion + 1));
+    }
+
+    /**
+     * 不需要受理人确认的取消：直接把状态切到已关闭。
+     * <p>
+     * 条件里带上读到的状态、受理人与版本，避免与接取/改派/结单并发时互相覆盖。
+     * 用 wrapper 的 SET 而不是补丁实体，是为了让 {@code update_by}/{@code update_time}
+     * 与状态在同一条 SQL 里落库。
+     */
+    private void closeDirectly(Long id, WorkOrderEntity current, Long operatorId, int currentVersion) {
+        WorkOrderStatus status = current.getStatus();
+        LambdaUpdateWrapper<WorkOrderEntity> wrapper = Wrappers.<WorkOrderEntity>lambdaUpdate()
+                .eq(WorkOrderEntity::getId, id)
+                .eq(WorkOrderEntity::getStatus, status)
+                .eq(WorkOrderEntity::getVersion, currentVersion)
+                .set(WorkOrderEntity::getStatus, WorkOrderStatus.CLOSED)
+                // 已关闭的单子不该再显示“取消待确认”；正常路径下它本来就是 null。
+                .set(WorkOrderEntity::getCancelRequestedAt, null)
+                .set(WorkOrderEntity::getUpdateBy, operatorId)
+                .set(WorkOrderEntity::getUpdateTime, LocalDateTime.now())
+                .set(WorkOrderEntity::getVersion, currentVersion + 1);
+        // 读到的受理人 (可能为 null) 也参与条件: 期间被人接走时这次关闭应当失败。
+        if (current.getAssigneeId() == null) {
+            wrapper.isNull(WorkOrderEntity::getAssigneeId);
+        } else {
+            wrapper.eq(WorkOrderEntity::getAssigneeId, current.getAssigneeId());
+        }
+
+        int rows = workOrderDao.update(null, wrapper);
+        if (rows == 0) {
+            WorkOrderEntity latest = workOrderDao.selectById(id);
+            if (latest == null) {
+                R.error(WorkOrderRsm.WORK_ORDER_NOT_FOUND);
+            }
+            if (latest.getStatus() != status) {
+                R.error(WorkOrderRsm.WORK_ORDER_NOT_CANCELABLE);
+            }
+            R.error(WorkOrderRsm.WORK_ORDER_CONCURRENT_MODIFIED);
+        }
+    }
+
+    /** 处理取消申请时更新失败：把"申请没了 / 换人了 / 版本冲突"分开报。 */
+    private void reportDecisionConflict(Long id, Long operatorId) {
+        WorkOrderEntity latest = workOrderDao.selectById(id);
+        if (latest == null) {
+            R.error(WorkOrderRsm.WORK_ORDER_NOT_FOUND);
+        }
+        if (latest.getStatus() != WorkOrderStatus.ACCEPTED || latest.getCancelRequestedAt() == null) {
+            R.error(WorkOrderRsm.WORK_ORDER_CANCEL_REQUEST_ABSENT);
+        }
+        if (!operatorId.equals(latest.getAssigneeId())) {
+            R.error(WorkOrderRsm.WORK_ORDER_CANCEL_DECISION_FORBIDDEN);
+        }
+        R.error(WorkOrderRsm.WORK_ORDER_CONCURRENT_MODIFIED);
     }
 
     /**
@@ -282,7 +525,8 @@ public class WorkOrderServiceImpl implements WorkOrderService {
      * 某个时间区间内"完成"的工单数。
      * <p>
      * 没有独立的完成时间字段，这里用 {@code update_time} 近似 —— 口径写在
-     * {@link WorkOrderStatsRes} 的类注释里。等"解决/关闭"接口做出来后再换成真实时间。
+     * {@link WorkOrderStatsRes} 的类注释里。结单会写入 {@code RESOLVED}；
+     * 等补上 {@code resolved_time} 后再换成真实完成时间。
      */
     private long countCompleted(LocalDateTime start, LocalDateTime end) {
         LambdaQueryWrapper<WorkOrderEntity> wrapper = Wrappers.<WorkOrderEntity>lambdaQuery()
@@ -420,6 +664,32 @@ public class WorkOrderServiceImpl implements WorkOrderService {
             R.error(WorkOrderRsm.WORK_ORDER_STATUS_INVALID);
         }
         return parsed.get();
+    }
+
+    /**
+     * 解析列表范围。
+     *
+     * @return {@code null} 表示不按人过滤（all / 未传）；非法值直接按业务错误拒绝
+     */
+    private static ListScope parseScope(String raw) {
+        if (!StringUtils.hasText(raw) || "all".equalsIgnoreCase(raw.trim())) {
+            return null;
+        }
+        String value = raw.trim();
+        if ("created".equalsIgnoreCase(value)) {
+            return ListScope.CREATED;
+        }
+        if ("assigned".equalsIgnoreCase(value)) {
+            return ListScope.ASSIGNED;
+        }
+        R.error(WorkOrderRsm.WORK_ORDER_SCOPE_INVALID);
+        return null;
+    }
+
+    /** 列表范围。语义对应"我提交的"和"我受理的" */
+    private enum ListScope {
+        CREATED,
+        ASSIGNED
     }
 
     /**
