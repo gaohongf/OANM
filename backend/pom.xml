@@ -43,6 +43,7 @@
         <module>service-ai</module>
         <module>service-message</module>
         <module>service-files</module>
+        <module>service-software</module>
     </modules>
     <dependencies>
       <dependency>

@@ -26,10 +26,19 @@ import lombok.AllArgsConstructor;
  * 由网关的 {@code /file/**} 路由转发到本服务, 再由 X File Storage 自动注册的静态资源
  * 映射直接返回文件内容 —— 不需要一个把整个文件读进内存再写出去的下载接口。
  *
- * <h2>为什么上传只需要登录, 删除需要权限</h2>
- * 任何能建单的用户都要能传附件, 所以上传标 {@link LoginOnly}: 它不产生权限行,
- * 新用户不会因为"还没被授予文件权限"而传不了附件。
- * 删除是破坏性操作, 走自注册的 {@code DELETE:/api/files} 权限行, 由管理端显式授权。
+ * <h2>两个上传入口, 权限和上限绑在一起</h2>
+ * <ul>
+ *   <li>{@code /upload/image}: 普通用户传图片, 标 {@link LoginOnly}。任何登录用户都能用
+ *       （提单要传截图）, 但只收常见图片格式、单张 10MB。</li>
+ *   <li>{@code /upload/large}: 管理员/运维传大文件（打印机驱动、安装包）, 不标
+ *       {@link LoginOnly}, 因此会自注册出 {@code POST:/api/files/upload/large} 权限行,
+ *       由管理端显式授权。收任意类型、单个 1GB。</li>
+ * </ul>
+ * 不合成一个接口的原因就在上面: 权限和大小上限是一体的。合成一个之后, 要么所有人都能传
+ * 1GB 任意文件, 要么传一张截图也得先被授权。
+ *
+ * <h2>为什么删除也需要权限</h2>
+ * 删除是破坏性操作, 走自注册的 {@code DELETE:/api/files} 权限行。
  */
 @AllArgsConstructor
 @RestController
@@ -39,21 +48,38 @@ public class FileController {
     private final FileService fileService;
 
     /**
-     * 上传一个文件。
+     * 上传一张图片（登录即可）。
      *
      * @param file       表单字段名必须是 {@code file}
      * @param objectType 文件所属对象类型, 可为空
      * @param objectId   文件所属对象 id, 可为空
      */
     @LoginOnly
-    @PostMapping(value = "/upload", consumes = MediaType.MULTIPART_FORM_DATA_VALUE)
+    @PostMapping(value = "/upload/image", consumes = MediaType.MULTIPART_FORM_DATA_VALUE)
     @ExecutionSuccess(GenericRsm.CREATE_SUCCESS)
     @ExecutionFailed(GenericRsm.CREATE_FAILED)
-    public FileUploadRes upload(
+    public FileUploadRes uploadImage(
             @RequestPart("file") MultipartFile file,
             @RequestParam(name = "objectType", required = false) String objectType,
             @RequestParam(name = "objectId", required = false) String objectId) {
-        return fileService.upload(file, objectType, objectId);
+        return fileService.uploadImage(file, objectType, objectId);
+    }
+
+    /**
+     * 上传一个大文件（需要 {@code POST:/api/files/upload/large} 权限）。
+     *
+     * @param file       表单字段名必须是 {@code file}
+     * @param objectType 文件所属对象类型, 可为空
+     * @param objectId   文件所属对象 id, 可为空
+     */
+    @PostMapping(value = "/upload/large", consumes = MediaType.MULTIPART_FORM_DATA_VALUE)
+    @ExecutionSuccess(GenericRsm.CREATE_SUCCESS)
+    @ExecutionFailed(GenericRsm.CREATE_FAILED)
+    public FileUploadRes uploadLarge(
+            @RequestPart("file") MultipartFile file,
+            @RequestParam(name = "objectType", required = false) String objectType,
+            @RequestParam(name = "objectId", required = false) String objectId) {
+        return fileService.uploadLarge(file, objectType, objectId);
     }
 
     /**

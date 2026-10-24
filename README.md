@@ -39,6 +39,8 @@
 |service-work-order|工单|8090|`/api/ops`|工单的创建、流转与处理|
 |service-ai|AI|8085|`/api/ai`|对接大模型，提供意图推断与工单生成能力|
 |service-message|消息|8093|`/api/message`|站内消息通知的基础设施（模板渲染、落库、SSE 推送）|
+|service-files|文件|8099|`/api/files`|文件上传与记录；图片（登录即可，10MB）和大文件（需「上传大文件」权限，1GB）是两个接口；上传后的 `/file/**` 静态访问也由它提供|
+|service-software|软件下载|8094|`/api/software`|软件分类、软件与版本管理、下载计数|
 
 外部请求一律先到网关，由网关按 `/api/**` 前缀转发到对应服务；服务之间调用的内部接口放在
 `/api` 之外（约定是 `/auth/internal/**`），因此天然无法从网外到达。
@@ -51,9 +53,11 @@ backend/
   common/              通用模块（被其他模块依赖，自身只有 src）
   api-gateway/         网关
   service-auth/        鉴权 + 系统管理   ┐
-  service-work-order/  工单             ├ 每个模块下都有 db/ 目录存数据库脚本
-  service-ai/          AI               │
-  service-message/     消息             ┘
+  service-work-order/  工单             │
+  service-ai/          AI               ├ 每个模块下都有 db/ 目录存数据库脚本
+  service-message/     消息             │
+  service-files/       文件             │
+  service-software/    软件下载         ┘
 web/
   oanm-web/            前端源码（React + Vite）
 standard.md            工程规范，动手前先读
@@ -81,6 +85,9 @@ docker run -d --name kafka-1-9092 -p 9092:9092 apache/kafka:latest
 |`backend/service-work-order/db/schema.sql`|工单表|
 |`backend/service-message/db/schema.sql`|消息表、消息模板表|
 |`backend/service-message/db/seed.sql`|消息模板的种子数据|
+|`backend/service-files/db/schema.sql`|文件上传记录表|
+|`backend/service-software/db/schema.sql`|软件分类、软件、软件版本表|
+|`backend/service-software/db/seed.sql`|内置软件分类|
 
 脚本都写成可重复执行的（种子数据用 `WHERE NOT EXISTS` 兜底），重跑不会产生重复行。
 新增表结构时**改 `schema.sql` 并在库里手工执行一遍**，不要只改代码。
@@ -90,7 +97,7 @@ docker run -d --name kafka-1-9092 -p 9092:9092 apache/kafka:latest
 四个中间件就位后，按依赖顺序启动：
 
 ```
-api-gateway(8080) → service-auth(8084) → service-work-order(8090) / service-ai(8085) / service-message(8093)
+api-gateway(8080) → service-auth(8084) → service-work-order(8090) / service-ai(8085) / service-message(8093) / service-files(8099) / service-software(8094)
 ```
 
 前端：

@@ -28,7 +28,7 @@ import { generateWorkOrderDraft, startIntentInference, submitWorkOrderDraft } fr
 import type { IntentNode, WorkOrderDraft } from '../../api/ai'
 import { clearDraft, draftInputRounds, emptyDraft, loadDraft, saveDraft } from '../../api/aiSession'
 import type { IntentDraft, IntentRound } from '../../api/aiSession'
-import { uploadFile } from '../../api/files'
+import { IMAGE_MAX_BYTES, uploadFile } from '../../api/files'
 import type { UploadedFile } from '../../api/files'
 import { ChatBubble } from './components/ChatBubble'
 import type { BubbleContent } from './components/ChatBubble'
@@ -50,8 +50,8 @@ const GUIDE_TIPS = [
 
 /** 每条消息最多几张图。后端有同样的校验，这里先挡是为了给出即时反馈。 */
 const MAX_IMAGES = 3
-/** 单张图片上限。service-files 的 multipart 上限是 50MB，这条是产品约束。 */
-const MAX_IMAGE_SIZE = 10 * 1024 * 1024
+/** 单张图片上限，与后端图片上传接口一致；这里先挡是为了给出即时反馈。 */
+const MAX_IMAGE_SIZE = IMAGE_MAX_BYTES
 const MAX_IMAGE_SIZE_TEXT = '10MB'
 
 /**

@@ -3,6 +3,7 @@ import {
   AppstoreOutlined,
   BellOutlined,
   DashboardOutlined,
+  DownloadOutlined,
   FileDoneOutlined,
   FileTextOutlined,
   RobotOutlined,
@@ -37,6 +38,8 @@ const ICONS: Record<string, ReactNode> = {
   robot: <RobotOutlined />,
   // 「消息中心」菜单用的图标（见 service-auth/db/seed.sql 第 8 段）
   bell: <BellOutlined />,
+  // 「软件下载」菜单用的图标（见 service-auth/db/seed.sql 第 8 段「自助软件下载」）
+  download: <DownloadOutlined />,
 }
 
 const DEFAULT_ICON = <AppstoreOutlined />

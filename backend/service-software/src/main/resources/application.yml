@@ -1,0 +1,33 @@
+server:
+  port: 8094
+spring:
+  config:
+    import:
+      # 必须项：导入 Nacos 配置（optional: 前缀表示配置非必需，缺失时不报错）
+      # common 把 mybatis-plus 和 PostgreSQL 驱动带给了所有服务, DataSourceAutoConfiguration
+      # 因此会激活 —— 不导入这两份就会启动失败。
+      - optional:nacos:datasource-config-${spring.profiles.active}?group=DEFAULT_GROUP
+      - optional:nacos:common-config-${spring.profiles.active}?group=DEFAULT_GROUP
+      - optional:nacos:${spring.application.name}?group=DEFAULT_GROUP
+      - optional:nacos:${spring.application.name}-${spring.profiles.active}?group=DEFAULT_GROUP
+
+  application:
+    name: service-software
+  profiles:
+    active: dev
+  cloud:
+    nacos:
+      discovery:
+        server-addr: 127.0.0.1:8848
+      config:
+        server-addr: 127.0.0.1:8848
+        file-extension: yaml
+        namespace: ${NACOS_NAMESPACE:}
+    # @User 的解析发生在 JSON 序列化过程中，回源调用必须快速失败。
+    # 本服务响应里暂时没有 @User 字段，但 common 的自动配置按统一参数生效。
+    openfeign:
+      client:
+        config:
+          default:
+            connectTimeout: 500
+            readTimeout: 800

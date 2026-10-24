@@ -3,14 +3,27 @@ import { ApiError, request } from './http'
 /**
  * 文件上传。
  *
- * 上传接口在 service-files（`POST /api/files/upload`），读取不需要经过这里：
- * 返回的 `url` 是相对地址，浏览器直接按网关同源访问（网关有 `/file/**` 路由）。
+ * 后端有两个上传入口，权限和上限是绑在一起的：
+ * - 图片接口 `/api/files/upload/image`：登录即可（后端 `@LoginOnly`），单张 10MB，
+ *   只收常见图片格式。提单截图这类场景都走它。
+ * - 大文件接口 `/api/files/upload/large`：需要 `POST:/api/files/upload/large` 权限
+ *   （管理员 / 运维），单个 1GB，不限类型。上传软件安装包时显式传 `kind: 'large'`。
  *
- * 上传只要求登录（后端 `@LoginOnly`），所以任何能提单的用户都能附截图；
- * 删除才需要单独授权，本页没有删除入口。
+ * 读取不需要经过这里：返回的 `url` 是相对地址，浏览器直接按网关同源访问
+ * （网关有 `/file/**` 路由）。
  */
 
-export const FILE_UPLOAD_PATH = '/api/files/upload'
+export const FILE_IMAGE_UPLOAD_PATH = '/api/files/upload/image'
+export const FILE_LARGE_UPLOAD_PATH = '/api/files/upload/large'
+
+/** 图片接口的单文件上限，与后端 `UploadLimits.IMAGE_MAX_BYTES` 一致。 */
+export const IMAGE_MAX_BYTES = 10 * 1024 * 1024
+
+/** 大文件接口的单文件上限，与后端 `UploadLimits.LARGE_MAX_BYTES` 一致。 */
+export const LARGE_MAX_BYTES = 1024 * 1024 * 1024
+
+/** 走哪个上传入口 */
+export type UploadKind = 'image' | 'large'
 
 /** 上传成功后拿到的文件信息。字段与后端 `FileUploadRes` 一一对应。 */
 export interface UploadedFile {
@@ -26,6 +39,8 @@ export interface UploadedFile {
 }
 
 export interface UploadFileOptions {
+  /** 默认 `image`（登录即可）；上传安装包等大文件时传 `large`（需要权限） */
+  kind?: UploadKind
   /** 文件所属对象类型，比如 `AI_INTENT` */
   objectType?: string
   /** 文件所属对象 id；首轮对话还没有 conversationId 时可不传 */
@@ -44,10 +59,11 @@ export async function uploadFile(
   file: File,
   options: UploadFileOptions = {},
 ): Promise<UploadedFile> {
+  const path = options.kind === 'large' ? FILE_LARGE_UPLOAD_PATH : FILE_IMAGE_UPLOAD_PATH
   const form = new FormData()
   form.append('file', file)
 
-  const raw = await request<Partial<UploadedFile> | null>(FILE_UPLOAD_PATH, {
+  const raw = await request<Partial<UploadedFile> | null>(path, {
     method: 'POST',
     body: form,
     query: {

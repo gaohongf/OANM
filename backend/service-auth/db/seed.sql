@@ -273,3 +273,53 @@ WHERE permission_id IN (SELECT id FROM permissions
 DELETE FROM permissions
 WHERE permission_key IN ('GET:/api/ai/assistant/wouiii',
                          'GET:/api/ai/assistant/wos');
+
+-- ------------------------------------------------------------
+-- 8. 自助软件下载
+--
+--    「软件下载」对所有登录用户开放: 菜单的 permission_id 为 NULL,
+--    对应的接口也标了 @LoginOnly, 不需要额外授权。
+--    「软件管理」是管理功能, 挂在「系统管理」下, 按权限控制。
+-- ------------------------------------------------------------
+
+-- 8.1 软件管理页面的权限。
+--     service-software 启动时也会自注册出这个键; 这里先种一遍, 防止
+--     种子脚本先于服务执行时, 8.3 的子查询取到 NULL(fail-open)。
+INSERT INTO permissions (id, permission_key, label, create_time, update_time, deleted, version)
+SELECT -10, 'GET:/api/software/manage', '软件管理', NOW(), NOW(), 0, 0
+WHERE NOT EXISTS (SELECT 1 FROM permissions WHERE permission_key = 'GET:/api/software/manage');
+
+-- 8.2 顶级菜单「软件下载」。permission_id 为 NULL = 所有已登录用户可见。
+--     component 必须与 src/pages/software/SoftwareDownload.tsx 逐字一致。
+INSERT INTO menus (id, parent_id, name, path, component, icon, sort, hidden, keep_alive, permission_id, enabled, locked, source, create_time, update_time, deleted, version)
+SELECT -11, NULL, '软件下载', '/software/download', 'software/SoftwareDownload', 'download', 2, FALSE, FALSE, NULL, TRUE, FALSE, 'MANUAL', NOW(), NOW(), 0, 0
+WHERE NOT EXISTS (SELECT 1 FROM menus WHERE id = -11);
+
+-- 8.3 「系统管理 → 软件管理」。
+--     component 对应 src/pages/software/SoftwareManage.tsx。
+INSERT INTO menus (id, parent_id, name, path, component, icon, sort, hidden, keep_alive, permission_id, enabled, locked, source, create_time, update_time, deleted, version)
+SELECT -36, -30, '软件管理', '/software/manage', 'software/SoftwareManage', 'appstore', 6, FALSE, FALSE,
+       (SELECT id FROM permissions WHERE permission_key = 'GET:/api/software/manage'),
+       TRUE, FALSE, 'MANUAL', NOW(), NOW(), 0, 0
+WHERE NOT EXISTS (SELECT 1 FROM menus WHERE id = -36);
+
+-- 8.4 网关路由。按 path_pattern 判重, 避免与手工建过的同前缀路由重复。
+--     注意: 直接 SQL 插入不会触发路由版本号广播, 网关需要重启一次才会加载。
+INSERT INTO api_routes (id, name, path_pattern, uri, route_order, enabled, locked, source, create_time, update_time, deleted, version)
+SELECT -46, 'Software Service', '/api/software/**', 'lb://service-software', 15, TRUE, FALSE, 'MANUAL', NOW(), NOW(), 0, 0
+WHERE NOT EXISTS (SELECT 1 FROM api_routes WHERE path_pattern = '/api/software/**');
+
+-- ------------------------------------------------------------
+-- 9. 大文件上传接口的权限
+--
+--    /api/files/upload/image 标了 @LoginOnly（登录即可传图）, 不产生权限行。
+--    /api/files/upload/large 用于上传软件安装包这类大文件, 只给管理员和运维:
+--    admin 持有 '*' 无需授权, 其他角色需要在「角色权限」里显式勾上这一条。
+--
+--    service-files 启动时也会自注册出这个键; 这里先种一遍, 保证服务还没启动时
+--    管理端就能看到并授予它。id 取负数只在 permissions 表内唯一, 与 menus 表
+--    的负数互不影响（-11 已被「软件下载」菜单占用, 这里用 -12 避免看错）。
+-- ------------------------------------------------------------
+INSERT INTO permissions (id, permission_key, label, create_time, update_time, deleted, version)
+SELECT -12, 'POST:/api/files/upload/large', '上传大文件', NOW(), NOW(), 0, 0
+WHERE NOT EXISTS (SELECT 1 FROM permissions WHERE permission_key = 'POST:/api/files/upload/large');

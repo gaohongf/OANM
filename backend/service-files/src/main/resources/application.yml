@@ -19,11 +19,21 @@ spring:
   profiles:
     active: dev
   # 默认上限是单文件 1MB / 单请求 10MB, 连一张截图都传不上去。
-  # 这两个值只限制请求体大小, 不涉及业务判断。
+  #
+  # multipart 的限额是 servlet 级、全局的, 不能只对某个接口放大, 所以这里按最大的
+  # 端点（大文件上传, 1GB）设置。按端点区分的限制在业务层:
+  #   - /api/files/upload/image: 10MB, 另有 UploadSizeInterceptor 在解析请求体
+  #     之前按 Content-Length 先拒绝一次;
+  #   - /api/files/upload/large: 1GB, 由 FileServiceImpl 校验。
+  # 这份上限只负责兜住"大得离谱"的请求, 不承担业务判断。
   servlet:
     multipart:
-      max-file-size: 50MB
-      max-request-size: 60MB
+      max-file-size: 1024MB
+      max-request-size: 1060MB
+      # 延迟解析: 请求进 DispatcherServlet 时不立刻解析 body, 等 controller 真正
+      # 读取 @RequestPart 时才落盘。不打开的话拦截器没有提前拒绝超大请求的机会,
+      # 一个 900MB 的"图片"会先被完整写进临时目录再被业务校验拒掉。
+      resolve-lazily: true
   cloud:
     nacos:
       discovery:

@@ -42,4 +42,16 @@ public class FileRsm implements RsmManager {
     /** objectType / objectId 超出 {@code file_detail} 的 varchar(32) */
     @RsmInfo(template = "文件关联对象标识过长（最多 32 个字符）", status = HttpStatus.BAD_REQUEST)
     public static final String FILE_OBJECT_INVALID = "File_FILE_OBJECT_INVALID";
+
+    /** 图片上传接口: 文件超过 {@code UploadLimits.IMAGE_MAX_BYTES} */
+    @RsmInfo(template = "图片不能超过 10MB", status = HttpStatus.PAYLOAD_TOO_LARGE)
+    public static final String FILE_IMAGE_TOO_LARGE = "File_FILE_IMAGE_TOO_LARGE";
+
+    /** 图片上传接口: 扩展名不在白名单内, 或声明的 Content-Type 不是图片 */
+    @RsmInfo(template = "只支持 jpg、jpeg、png、gif、webp、bmp 格式的图片", status = HttpStatus.BAD_REQUEST)
+    public static final String FILE_IMAGE_TYPE_INVALID = "File_FILE_IMAGE_TYPE_INVALID";
+
+    /** 大文件上传接口: 文件超过 {@code UploadLimits.LARGE_MAX_BYTES} */
+    @RsmInfo(template = "文件不能超过 1GB", status = HttpStatus.PAYLOAD_TOO_LARGE)
+    public static final String FILE_TOO_LARGE = "File_FILE_TOO_LARGE";
 }
