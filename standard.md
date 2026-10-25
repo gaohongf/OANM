@@ -5,6 +5,8 @@
 1. backend 存放后端源码
 2. web 存放前端源码
 3. backend 里由多个模块构成，模块里的src文件夹存放java源码，db文件夹存放数据库文件
+4. 数据库脚本不引入 Flyway，需按 README 的顺序手工执行。脚本必须可重复执行（种子数据用
+   `WHERE NOT EXISTS` 判重）；变更表结构时同步修改 `schema.sql` 并在数据库中执行，不能只改代码。
 
 ## 开发规范
 
@@ -25,13 +27,18 @@
    2. **服务内部路径必须与外部路径完全一致**，网关路由不加 `StripPrefix`。
       这样一份路径同时是"网关谓词""服务内路由""权限键"三样东西，改一处不会漏掉另一处。
    3. 服务之间调用的内部接口放在 `/api` 之外（现有约定是 `/auth/internal/**`），
-      并标 `@IsOpen`。因为网关只匹配 `/api/**`，这些端点天然无法从外部到达 ——
+      并标 `@IsOpen`。网关只转发 `/api/**` 与 `/file/**`，这些端点天然无法从外部到达 ——
       不要靠"记得关掉网关的某个开关"来保证这件事。
    4. 鉴权拦截器会把请求解析成 `METHOD:路径模式`（如 `GET:/api/ops/work_order/{id}`），
       拿它去比对用户权限。所以**路径里的参数要写成 `{id}` 而不是具体值**，
       权限数据里存的也是这个模式。
 1. 如果一个端点是公开的则要添加 @com.github.gaohongf.auth.annotation.IsOpen注解
 2. 向所有登录的用户公开标记 @com.github.gaohongf.auth.annotation.LoginOnly注解
+3. **响应模型里的 id 一律是 `String`，不能是 `Long`。** 主键是 19 位雪花 id，
+   JavaScript 的 `Number` 只能精确表示到 `2^53 - 1`，以数字出网会被静默舍入成另一个值，且不报错。
+   前端侧对应地不要写 `Number(id)`。
+4. **通用组件放在 `common`，但网关不依赖它**，需要时各自显式引入。
+   `common` 里的 `@Component` 必须通过 `AutoConfiguration.imports` 注册，否则在其他服务里静默失效。
 
 # Servlet服务
 

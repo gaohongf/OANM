@@ -25,7 +25,16 @@ replay_pid*
 
 # Security
 *.secret
+# Docker Compose 的本地配置（可能含大模型 API Key）
+.env
 
+# # docker/maven-repo 里的私有依赖需要随仓库分发，上面的 *.jar 规则对它网开一面
+# !docker/maven-repo/**/*.jar
+
+docker/*
+docker-compose.yml
+.dockerignore
+.env.example
 # IDE
 .vscode/*
 !.vscode/extensions.json

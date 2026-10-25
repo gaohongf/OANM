@@ -238,6 +238,13 @@ INSERT INTO api_routes (id, name, path_pattern, uri, route_order, enabled, locke
 SELECT -41, 'AI Service', '/api/ai/**', 'lb://service-ai', 11, TRUE, FALSE, 'MANUAL', NOW(), NOW(), 0, 0
 WHERE NOT EXISTS (SELECT 1 FROM api_routes WHERE path_pattern = '/api/ai/**');
 
+-- 站内消息与 SSE 推送。前端 /api/message/** 直接走网关，
+-- 缺少这一条时通知列表和实时推送都会 404（新库尤其容易漏，因为开发库里的这行
+-- 可能是早先在路由管理界面手工建的）。
+INSERT INTO api_routes (id, name, path_pattern, uri, route_order, enabled, locked, source, create_time, update_time, deleted, version)
+SELECT -43, 'Message Service', '/api/message/**', 'lb://service-message', 12, TRUE, FALSE, 'MANUAL', NOW(), NOW(), 0, 0
+WHERE NOT EXISTS (SELECT 1 FROM api_routes WHERE path_pattern = '/api/message/**');
+
 -- 文件访问不走 /api 前缀: 存储平台配置的 domain 是 /file/, 访问地址由 service-files
 -- 通过静态资源映射直接返回, 网关只负责按前缀转发。路径原样透传, 不做 StripPrefix。
 INSERT INTO api_routes (id, name, path_pattern, uri, route_order, enabled, locked, source, create_time, update_time, deleted, version)
