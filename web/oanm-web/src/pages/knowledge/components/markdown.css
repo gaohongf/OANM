@@ -1,0 +1,136 @@
+/*
+ * 知识库 Markdown 样式。
+ *
+ * 颜色优先取 antd 的 CSS 变量，取不到时退回 antd 亮色主题的默认值 ——
+ * 当前项目没有开启 cssVar，所以实际生效的是兜底值；以后开启 cssVar
+ * 或换成暗色主题时，这里会自动跟着变。
+ */
+.knowledge-markdown {
+  color: var(--ant-color-text, rgba(0, 0, 0, 0.88));
+  font-size: 14px;
+  line-height: 1.75;
+  word-break: break-word;
+}
+
+.knowledge-markdown > :first-child {
+  margin-top: 0;
+}
+
+.knowledge-markdown > :last-child {
+  margin-bottom: 0;
+}
+
+.knowledge-markdown h1,
+.knowledge-markdown h2,
+.knowledge-markdown h3,
+.knowledge-markdown h4,
+.knowledge-markdown h5,
+.knowledge-markdown h6 {
+  margin: 1.2em 0 0.6em;
+  font-weight: 600;
+  line-height: 1.35;
+}
+
+.knowledge-markdown h1 {
+  font-size: 1.7em;
+  padding-bottom: 0.3em;
+  border-bottom: 1px solid var(--ant-color-border-secondary, #f0f0f0);
+}
+
+.knowledge-markdown h2 {
+  font-size: 1.4em;
+  padding-bottom: 0.25em;
+  border-bottom: 1px solid var(--ant-color-border-secondary, #f0f0f0);
+}
+
+.knowledge-markdown h3 {
+  font-size: 1.2em;
+}
+
+.knowledge-markdown p {
+  margin: 0.8em 0;
+}
+
+.knowledge-markdown ul,
+.knowledge-markdown ol {
+  margin: 0.6em 0;
+  padding-left: 1.8em;
+}
+
+.knowledge-markdown li {
+  margin: 0.25em 0;
+}
+
+.knowledge-markdown li > ul,
+.knowledge-markdown li > ol {
+  margin: 0.25em 0;
+}
+
+.knowledge-markdown a {
+  color: var(--ant-color-link, #1677ff);
+  text-decoration: none;
+}
+
+.knowledge-markdown a:hover {
+  text-decoration: underline;
+}
+
+.knowledge-markdown blockquote {
+  margin: 1em 0;
+  padding: 0.2em 1em;
+  color: var(--ant-color-text-secondary, rgba(0, 0, 0, 0.65));
+  border-left: 4px solid var(--ant-color-border, #d9d9d9);
+  background: var(--ant-color-fill-quaternary, #fafafa);
+}
+
+.knowledge-markdown code {
+  padding: 0.15em 0.35em;
+  font-family: 'SFMono-Regular', Consolas, 'Liberation Mono', Menlo, monospace;
+  font-size: 0.9em;
+  background: var(--ant-color-fill-tertiary, rgba(0, 0, 0, 0.06));
+  border-radius: 4px;
+}
+
+.knowledge-markdown pre {
+  margin: 1em 0;
+  padding: 12px 16px;
+  overflow-x: auto;
+  background: var(--ant-color-fill-quaternary, #f5f5f5);
+  border-radius: 6px;
+}
+
+.knowledge-markdown pre code {
+  padding: 0;
+  font-size: 13px;
+  background: transparent;
+}
+
+.knowledge-markdown table {
+  display: block;
+  width: 100%;
+  margin: 1em 0;
+  overflow-x: auto;
+  border-collapse: collapse;
+}
+
+.knowledge-markdown th,
+.knowledge-markdown td {
+  padding: 6px 12px;
+  border: 1px solid var(--ant-color-border-secondary, #f0f0f0);
+  text-align: left;
+}
+
+.knowledge-markdown th {
+  font-weight: 600;
+  background: var(--ant-color-fill-quaternary, #fafafa);
+}
+
+.knowledge-markdown img {
+  max-width: 100%;
+}
+
+.knowledge-markdown hr {
+  margin: 1.5em 0;
+  border: none;
+  border-top: 1px solid var(--ant-color-border-secondary, #f0f0f0);
+}

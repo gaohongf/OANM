@@ -29,8 +29,8 @@
           升级 Spring Boot 后如果出现 Lombok 相关诡异报错, 先来对一下这个值。
         -->
         <lombok.version>1.18.46</lombok.version>
-        <spring-ai.version>1.1.2</spring-ai.version>
-        <spring-ai.chat-memory-repository-jdbc.version>1.1.2</spring-ai.chat-memory-repository-jdbc.version>
+        <spring-ai.version>1.1.8</spring-ai.version>
+        <spring-ai.chat-memory-repository-jdbc.version>1.1.8</spring-ai.chat-memory-repository-jdbc.version>
         <spring-ai.alibaba.version>1.1.2.2</spring-ai.alibaba.version>
         <x-file-storage.version>2.3.0</x-file-storage.version>
     </properties>
@@ -44,6 +44,7 @@
         <module>service-message</module>
         <module>service-files</module>
         <module>service-software</module>
+        <module>service-knowledge</module>
     </modules>
     <dependencies>
       <dependency>

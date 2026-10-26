@@ -1,6 +1,7 @@
 package com.github.gaohongf.auth.service.impl;
 
 import org.springframework.stereotype.Service;
+import org.springframework.transaction.annotation.Transactional;
 import org.springframework.util.StringUtils;
 
 import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
@@ -8,10 +9,12 @@ import com.baomidou.mybatisplus.core.metadata.IPage;
 import com.baomidou.mybatisplus.core.toolkit.Wrappers;
 import com.baomidou.mybatisplus.extension.plugins.pagination.Page;
 import com.github.gaohongf.auth.dao.MenuDao;
+import com.github.gaohongf.auth.dao.MenuPermissionDao;
 import com.github.gaohongf.auth.dao.PermissionDao;
 import com.github.gaohongf.auth.dao.RolePermissionDao;
 import com.github.gaohongf.auth.entity.po.MenuEntity;
 import com.github.gaohongf.auth.entity.po.PermissionEntity;
+import com.github.gaohongf.auth.entity.po.intermediate.MenuPermissionEntity;
 import com.github.gaohongf.auth.entity.req.SavePermissionCommand;
 import com.github.gaohongf.model.PageRes;
 import com.github.gaohongf.auth.entity.res.PermissionRes;
@@ -30,6 +33,7 @@ public class PermissionServiceImpl implements PermissionService {
     private final PermissionDao permissionDao;
     private final RolePermissionDao rolePermissionDao;
     private final MenuDao menuDao;
+    private final MenuPermissionDao menuPermissionDao;
     private final PermissionConverter permissionConverter;
     private final AuthorityChangeNotifier authorityChangeNotifier;
 
@@ -93,6 +97,7 @@ public class PermissionServiceImpl implements PermissionService {
     }
 
     @Override
+    @Transactional
     public void delete(Long id) {
         PermissionEntity entity = permissionDao.selectById(id);
         if (entity == null) {
@@ -100,10 +105,19 @@ public class PermissionServiceImpl implements PermissionService {
         }
         rejectSuperKey(entity.getPermissionKey());
 
-        // 被菜单引用时拒绝。不这么做的话, 菜单那一行的 permission_id 会指向一个
-        // 已删除的权限 —— 它的 key 查不出来, 菜单就失去了门禁, 变成对所有人可见。
+        // 被菜单引用时拒绝。不这么做的话, 菜单门禁会指向一个已删除的权限 ——
+        // 它的 key 查不出来, 这条关联就不再授权; 若它是菜单唯一的门禁, 菜单会对所有人可见。
         // 这是 fail-open, 比报错严重得多, 所以宁可让管理员先解除引用。
-        if (menuDao.exists(Wrappers.<MenuEntity>lambdaQuery().eq(MenuEntity::getPermissionId, id))) {
+        //
+        // 两处都查: 关联表是新模型; 旧列在 seed 搬迁完之前仍然承载门禁。
+        // 事务边界覆盖"检查 → 删权限 → 删角色授权", 防止检查通过后有并发请求插入关联行。
+        boolean referencedByMenu = menuPermissionDao.exists(
+                Wrappers.<MenuPermissionEntity>lambdaQuery()
+                        .eq(MenuPermissionEntity::getPermissionId, id))
+                || menuDao.exists(
+                        Wrappers.<MenuEntity>lambdaQuery()
+                                .eq(MenuEntity::getPermissionId, id));
+        if (referencedByMenu) {
             R.error(AuthRsm.PERMISSION_IN_USE);
         }
 

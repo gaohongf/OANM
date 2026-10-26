@@ -1,0 +1,14 @@
+/*
+  子菜单标题里的链接跟随标题颜色。
+
+  antd 只写了 `.ant-menu-item a { color: inherit }`，没有覆盖子菜单标题 —— 标题里的 `a`
+  会落回全局链接色（主色蓝）。于是"页面节点下面挂了子节点"时（菜单拖拽后会出现这种结构），
+  标题文字会一直是蓝色，即使当前页并不在它下面。
+
+  这里只补上继承；选中态的蓝色仍由 antd 的 `.ant-menu-submenu-selected` 决定。
+*/
+.ant-menu-submenu-title a,
+.ant-menu-submenu-title a:hover,
+.ant-menu-submenu-title a:active {
+  color: inherit;
+}

@@ -1,0 +1,29 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE mapper PUBLIC "-//mybatis.org//DTD Mapper 3.0//EN"
+        "http://mybatis.org/dtd/mybatis-3-mapper.dtd">
+<mapper namespace="com.github.gaohongf.auth.dao.MenuPermissionDao">
+
+    <!--
+      说明: 该表无独立主键, 批量新增与按条件删除 BaseMapper 不提供, 故自定义。
+
+      deleted / version 直接写死 0: 这两列在库中是 NOT NULL, 且本表所有删除都是物理
+      DELETE, 不应存在 deleted = 1 的行。
+
+      审计字段沿用实体上的值 —— 本语句是裸 SQL, 不经过 MyBatis-Plus 的插入路径,
+      AuditMetaObjectHandler 的自动填充对它无效, 调用方必须自己填好。
+    -->
+    <insert id="insertBatch">
+        INSERT INTO menu_permissions (menu_id, permission_id, create_by, create_time, update_by, update_time, deleted,
+                                      version)
+        VALUES
+        <foreach collection="list" item="item" separator=",">
+            (#{item.menuId}, #{item.permissionId}, #{item.createBy}, #{item.createTime},
+             #{item.updateBy}, #{item.updateTime}, 0, 0)
+        </foreach>
+    </insert>
+
+    <delete id="deleteByMenuId">
+        DELETE FROM menu_permissions WHERE menu_id = #{menuId}
+    </delete>
+
+</mapper>

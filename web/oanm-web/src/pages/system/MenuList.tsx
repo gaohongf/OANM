@@ -21,10 +21,19 @@ import { PlusOutlined, ReloadOutlined } from '@ant-design/icons'
 
 import { request } from '../../api/http'
 import { Auth } from '../../permission/Auth'
+import { usePermission } from '../../permission/usePermission'
 import { availableComponents } from '../../router/registry'
 import type { MenuNode } from '../../types/api'
+import {
+  collectMenuKeys,
+  containsMenuNode,
+  findMenuNode,
+  planMenuMove,
+} from './components/menuDrag'
+import type { MenuDropPosition, MenuMovePlan } from './components/menuDrag'
+import './components/menuDrag.css'
 
-const { Text } = Typography
+const { Paragraph, Text } = Typography
 
 interface MenuForm {
   parentId: string | null
@@ -35,7 +44,8 @@ interface MenuForm {
   sort: number
   hidden: boolean
   keepAlive: boolean
-  permissionId: string | null
+  /** 门禁权限 id 集合；[] = 登录即可见。整体替换语义 */
+  permissionIds: string[]
   enabled: boolean
 }
 
@@ -50,6 +60,41 @@ const PERM_CREATE = 'POST:/api/auth/menus'
 const PERM_UPDATE = 'PUT:/api/auth/menus/{id}'
 const PERM_DELETE = 'DELETE:/api/auth/menus/{id}'
 
+const PERMISSION_PAGE_SIZE = 200
+const MAX_PERMISSION_PAGES = 20
+
+/**
+ * 权限下拉的全部选项。
+ *
+ * 接口按 `permission_key` 升序分页，`POST:` / `PUT:` 排在 `GET:` 后面 ——
+ * 只取第一页时，条数一多，要给菜单配的写权限可能根本不在选项里。
+ * 所以先取第一页拿 `total`，再并行取剩下的页。
+ *
+ * 上限 20 页（4000 条），超过时接受"只拿到前 4000 条"的限制；
+ * 真要更多，应该换服务端搜索，而不是在这里继续加页数。
+ */
+async function loadPermissionOptions(): Promise<PermissionOption[]> {
+  const first = await request<{ records: PermissionOption[]; total: number }>(
+    '/api/auth/permissions',
+    { query: { current: 1, size: PERMISSION_PAGE_SIZE } },
+  )
+  const pageCount = Math.min(
+    Math.ceil(first.total / PERMISSION_PAGE_SIZE),
+    MAX_PERMISSION_PAGES,
+  )
+  if (pageCount <= 1) {
+    return first.records
+  }
+  const rest = await Promise.all(
+    Array.from({ length: pageCount - 1 }, (_, index) =>
+      request<{ records: PermissionOption[] }>('/api/auth/permissions', {
+        query: { current: index + 2, size: PERMISSION_PAGE_SIZE },
+      }),
+    ),
+  )
+  return [first.records, ...rest.map((page) => page.records)].flat()
+}
+
 /**
  * 菜单管理。
  *
@@ -59,6 +104,11 @@ const PERM_DELETE = 'DELETE:/api/auth/menus/{id}'
  * `component` 用下拉而不是自由输入：可选项来自前端**白名单**（`availableComponents`），
  * 所以不可能配出一个打不开的页面。后端存的是相对 `src/pages/` 的文件路径，
  * 与这里的候选项逐字一致（大小写敏感）。
+ *
+ * ## 拖动调整结构
+ * 行中部 = 挂为目标节点的子项，行的上/下边缘 = 与目标同级换序，顶部虚线区 = 移到顶级。
+ * 移动复用现有的 `PUT /api/auth/menus/{id}`，不额外加接口：后端本来就会校验父子关系、
+ * 拒绝把节点挂到自己的子孙下面。
  */
 export default function MenuList() {
   const { message } = AntdApp.useApp()
@@ -70,6 +120,16 @@ export default function MenuList() {
   const [creating, setCreating] = useState(false)
   const [form] = Form.useForm<MenuForm>()
 
+  const canUpdate = usePermission(PERM_UPDATE)
+  const [expandedKeys, setExpandedKeys] = useState<string[]>([])
+  const [dragging, setDragging] = useState<MenuNode | null>(null)
+  const [dropTarget, setDropTarget] = useState<{
+    id: string
+    position: MenuDropPosition
+  } | null>(null)
+  const [rootDropActive, setRootDropActive] = useState(false)
+  const [moving, setMoving] = useState(false)
+
   /** @param silent 静默刷新（挂载时用）：不切换 loading，理由同 RoleList */
   const load = useCallback(
     async ({ silent = false }: { silent?: boolean } = {}) => {
@@ -78,15 +138,15 @@ export default function MenuList() {
       }
       try {
         // 权限列表用于给菜单绑定门禁。它可能上千行（自注册是"一个端点一条"），
-        // 所以拉大一点但仍走分页接口，而不是要求一个"全量"端点。
-        const [tree, page] = await Promise.all([
+        // 所以按 total 取完所有页，见 loadPermissionOptions。
+        const [tree, loadedPermissions] = await Promise.all([
           request<MenuNode[]>('/api/auth/menus'),
-          request<{ records: PermissionOption[] }>('/api/auth/permissions', {
-            query: { current: 1, size: 200 },
-          }),
+          loadPermissionOptions(),
         ])
         setMenus(tree)
-        setPermissions(page.records)
+        // 展开状态自己管：拖动后整棵树会重新拉取，defaultExpandAllRows 只在首次生效
+        setExpandedKeys(collectMenuKeys(tree))
+        setPermissions(loadedPermissions)
       } catch (error) {
         message.error(error instanceof Error ? error.message : '加载失败')
       } finally {
@@ -121,7 +181,7 @@ export default function MenuList() {
       sort: 0,
       hidden: false,
       keepAlive: false,
-      permissionId: null,
+      permissionIds: [],
       enabled: true,
     })
   }
@@ -138,19 +198,22 @@ export default function MenuList() {
       sort: record.sort,
       hidden: record.hidden,
       keepAlive: record.keepAlive,
-      permissionId: record.permissionId,
+      permissionIds: record.permissionIds ?? [],
       enabled: record.enabled,
     })
   }
 
   const onSubmit = async () => {
     const values = await form.validateFields()
+    // 多选清空后 antd 给的是 undefined。必须显式转成 []：后端把 null 当作"没传这个字段"
+    // （用于兼容旧前端的单个 permissionId），空数组才是"整体替换为空"。
+    const body = { ...values, permissionIds: values.permissionIds ?? [] }
     try {
       if (editing) {
-        await request<void>(`/api/auth/menus/${editing.id}`, { method: 'PUT', body: values })
+        await request<void>(`/api/auth/menus/${editing.id}`, { method: 'PUT', body })
         message.success('修改成功')
       } else {
-        await request<void>('/api/auth/menus', { method: 'POST', body: values })
+        await request<void>('/api/auth/menus', { method: 'POST', body })
         message.success('创建成功')
       }
       setCreating(false)
@@ -172,6 +235,57 @@ export default function MenuList() {
     }
   }
 
+  const clearDrag = useCallback(() => {
+    setDragging(null)
+    setDropTarget(null)
+    setRootDropActive(false)
+  }, [])
+
+  /**
+   * 逐条写回移动计划。
+   *
+   * 同级换序可能要改多行（整组兄弟重新编号），做不到一条 SQL 的原子性；
+   * 任何一条失败都重新拉一次，以服务端的真实状态为准，而不是让界面停在半成品上。
+   */
+  const applyMove = async (plan: MenuMovePlan[]) => {
+    if (plan.length === 0) {
+      clearDrag()
+      return
+    }
+    setMoving(true)
+    try {
+      for (const update of plan) {
+        const node = findMenuNode(menus, update.id)
+        if (!node) {
+          continue
+        }
+        await request<void>(`/api/auth/menus/${update.id}`, {
+          method: 'PUT',
+          body: {
+            parentId: update.parentId,
+            name: node.name,
+            path: node.path ?? undefined,
+            component: node.component ?? undefined,
+            icon: node.icon ?? undefined,
+            sort: update.sort,
+            hidden: node.hidden,
+            keepAlive: node.keepAlive,
+            // 拖动会回写整行：漏掉这个字段就等于静默清空门禁
+            permissionIds: node.permissionIds ?? [],
+            enabled: node.enabled,
+          },
+        })
+      }
+      message.success('菜单已移动')
+    } catch (error) {
+      message.error(error instanceof Error ? error.message : '移动失败')
+    } finally {
+      setMoving(false)
+      clearDrag()
+      await load({ silent: true })
+    }
+  }
+
   return (
     <Card
       title="菜单管理"
@@ -188,14 +302,133 @@ export default function MenuList() {
         </Space>
       }
     >
+      {canUpdate ? (
+        <>
+          <Paragraph type="secondary" style={{ marginBottom: 12 }}>
+            拖动行可调整菜单结构：放在行中部 = 挂为子项，放在行的上/下边缘 = 同级排序。
+          </Paragraph>
+          <div
+            onDragOver={(event) => {
+              if (!dragging || moving) {
+                return
+              }
+              event.preventDefault()
+              event.dataTransfer.dropEffect = 'move'
+              setRootDropActive(true)
+              setDropTarget(null)
+            }}
+            onDragLeave={() => setRootDropActive(false)}
+            onDrop={(event) => {
+              event.preventDefault()
+              if (!dragging) {
+                return
+              }
+              const others = menus.filter((node) => node.id !== dragging.id)
+              const maxSort = others.reduce((max, node) => Math.max(max, node.sort), 0)
+              // 已经是根节点、且本来就排在最后：不用写库
+              const plan: MenuMovePlan[] =
+                dragging.parentId === null && dragging.sort > maxSort
+                  ? []
+                  : [{ id: dragging.id, parentId: null, sort: maxSort + 1 }]
+              void applyMove(plan)
+            }}
+            style={{
+              marginBottom: 12,
+              padding: '8px 12px',
+              border: `1px dashed ${
+                rootDropActive
+                  ? 'var(--ant-color-primary, #1677ff)'
+                  : 'var(--ant-color-border, #d9d9d9)'
+              }`,
+              borderRadius: 8,
+              textAlign: 'center',
+              color: rootDropActive
+                ? 'var(--ant-color-primary, #1677ff)'
+                : 'var(--ant-color-text-tertiary, #8c8c8c)',
+              background: rootDropActive
+                ? 'var(--ant-color-primary-bg, #e6f4ff)'
+                : 'transparent',
+              transition: 'all 0.2s',
+            }}
+          >
+            拖到这里移到顶级菜单
+          </div>
+        </>
+      ) : null}
+
       <Table<MenuNode>
         rowKey="id"
-        loading={loading}
+        loading={loading || moving}
         dataSource={menus}
         pagination={false}
         scroll={{ x: 'max-content' }}
-        // 菜单本身就是树，直接把 children 交给表格渲染成可展开的层级
-        expandable={{ defaultExpandAllRows: true }}
+        // 展开状态自己管：拖动后整棵树会重新拉取
+        expandable={{
+          expandedRowKeys: expandedKeys,
+          onExpandedRowsChange: (keys) => setExpandedKeys(keys.map(String)),
+        }}
+        rowClassName={(record) => {
+          const classes: string[] = []
+          if (canUpdate) {
+            classes.push('menu-drag-row')
+          }
+          if (dragging?.id === record.id) {
+            classes.push('menu-drag-ghost')
+          }
+          if (dropTarget?.id === record.id) {
+            classes.push(`menu-drag-${dropTarget.position}`)
+          }
+          return classes.join(' ')
+        }}
+        onRow={(record) => ({
+          draggable: canUpdate && !moving,
+          onDragStart: (event) => {
+            if (!canUpdate || moving) {
+              event.preventDefault()
+              return
+            }
+            event.dataTransfer.effectAllowed = 'move'
+            // Firefox 必须 setData 才会真正开始拖动
+            event.dataTransfer.setData('text/plain', record.id)
+            setDragging(record)
+          },
+          onDragOver: (event) => {
+            if (!dragging || moving) {
+              return
+            }
+            // 拖到自己或自己的子孙上会成环：不接收，也不显示落点
+            if (record.id === dragging.id || containsMenuNode(dragging, record.id)) {
+              setDropTarget(null)
+              return
+            }
+            event.preventDefault()
+            event.dataTransfer.dropEffect = 'move'
+            const rect = event.currentTarget.getBoundingClientRect()
+            const ratio = (event.clientY - rect.top) / rect.height
+            const position: MenuDropPosition =
+              ratio < 0.3 ? 'before' : ratio > 0.7 ? 'after' : 'inside'
+            setDropTarget((prev) =>
+              prev && prev.id === record.id && prev.position === position
+                ? prev
+                : { id: record.id, position },
+            )
+            setRootDropActive(false)
+          },
+          onDragLeave: (event) => {
+            // 在行内单元格之间移动也会触发 dragleave，relatedTarget 还在行里就不清
+            if (!event.currentTarget.contains(event.relatedTarget as Node | null)) {
+              setDropTarget((prev) => (prev?.id === record.id ? null : prev))
+            }
+          },
+          onDrop: (event) => {
+            event.preventDefault()
+            if (!dragging || !dropTarget || dropTarget.id !== record.id) {
+              return
+            }
+            void applyMove(planMenuMove(menus, dragging.id, record.id, dropTarget.position))
+          },
+          onDragEnd: clearDrag,
+        })}
         columns={[
           { title: '名称', dataIndex: 'name', width: 200 },
           {
@@ -211,14 +444,32 @@ export default function MenuList() {
             render: (v: string | null) => (v ? <Text code>{v}</Text> : '-'),
           },
           {
-            title: '所需权限',
-            width: 220,
-            render: (_, r) =>
-              r.permissionKey ? (
-                <Text code>{r.permissionKey}</Text>
+            title: '所需权限（任一）',
+            width: 260,
+            render: (_, r) => {
+              // 缺字段兜底：发布窗口里旧后端可能还没有这两个数组，不能让它把整页渲染崩掉
+              const ids = r.permissionIds ?? []
+              const keys = r.permissionKeys ?? []
+              return ids.length > 0 ? (
+                <Space size={[4, 4]} wrap>
+                  {ids.map((id, index) => {
+                    // 按位置取键：两个数组后端保证同长同序，不能过滤 null（会错位）
+                    const key = keys[index]
+                    return key ? (
+                      <Text code key={id}>
+                        {key}
+                      </Text>
+                    ) : (
+                      <Tag color="red" key={id}>
+                        已失效 {id}
+                      </Tag>
+                    )
+                  })}
+                </Space>
               ) : (
                 <Text type="secondary">登录即可见</Text>
-              ),
+              )
+            },
           },
           { title: '排序', dataIndex: 'sort', width: 70 },
           {
@@ -327,8 +578,20 @@ export default function MenuList() {
             <Input placeholder="dashboard / setting / file / team / user / api" />
           </Form.Item>
 
-          <Form.Item name="permissionId" label="所需权限" extra="留空表示登录即可见。">
-            <Select allowClear showSearch optionFilterProp="label" options={permissionOptions} />
+          <Form.Item
+            name="permissionIds"
+            label="所需权限"
+            extra="可多选：持有任意一个即可见；留空表示登录即可见。"
+          >
+            <Select
+              mode="multiple"
+              allowClear
+              showSearch
+              optionFilterProp="label"
+              maxTagCount="responsive"
+              placeholder="留空表示登录即可见"
+              options={permissionOptions}
+            />
           </Form.Item>
 
           <Space size={24}>

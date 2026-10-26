@@ -28,12 +28,9 @@ replay_pid*
 # Docker Compose 的本地配置（可能含大模型 API Key）
 .env
 
-# # docker/maven-repo 里的私有依赖需要随仓库分发，上面的 *.jar 规则对它网开一面
-# !docker/maven-repo/**/*.jar
-
+# 本地开发用的中间件编排（PostgreSQL/Redis/Kafka/Nacos），不随仓库分发
 docker/*
 docker-compose.yml
-.dockerignore
 .env.example
 # IDE
 .vscode/*

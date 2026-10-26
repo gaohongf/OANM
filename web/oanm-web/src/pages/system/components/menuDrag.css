@@ -1,0 +1,28 @@
+/* 菜单拖拽：行本身可拖，落点用行的边框/底色提示 */
+
+.menu-drag-row {
+  cursor: grab;
+}
+
+.menu-drag-row:active {
+  cursor: grabbing;
+}
+
+/* 正在拖动的行淡出，落点才醒目 */
+.menu-drag-ghost > td {
+  opacity: 0.45;
+}
+
+/* 落在行中部：挂为子项。放到 td 上并加 !important，盖住表格的 hover 背景 */
+.menu-drag-inside > td {
+  background: var(--ant-color-primary-bg, #e6f4ff) !important;
+}
+
+/* 落在行的上/下边缘：同级换序 */
+.menu-drag-before > td {
+  box-shadow: inset 0 2px 0 var(--ant-color-primary, #1677ff);
+}
+
+.menu-drag-after > td {
+  box-shadow: inset 0 -2px 0 var(--ant-color-primary, #1677ff);
+}

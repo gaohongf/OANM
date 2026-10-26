@@ -193,6 +193,7 @@ COMMENT ON COLUMN role_permissions.version IS '乐观锁版本号';
 --   前端用 import.meta.glob('../pages/**/*.tsx') 建一张白名单按路径索引, 因此
 --   后端只能"选一个已存在的页面", 不能加载任意模块; 查不到就渲染 404 并 WARN。
 -- ------------------------------------------------------------
+DROP TABLE IF EXISTS menu_permissions CASCADE;
 DROP TABLE IF EXISTS menus CASCADE;
 CREATE TABLE menus
 (
@@ -205,8 +206,8 @@ CREATE TABLE menus
     sort          INTEGER      NOT NULL DEFAULT 0,
     hidden        BOOLEAN      NOT NULL DEFAULT FALSE,
     keep_alive    BOOLEAN      NOT NULL DEFAULT FALSE,
-    -- 用外键而不是权限键字符串: 字符串的失效模式是"权限改名后菜单关联静默断开 →
-    -- 菜单失去门禁 → 对所有人可见", 是 fail-open 的安全退化。外键则改名天然安全。
+    -- 已废弃的旧单权限列。新模型是 menu_permissions(一个菜单可挂多个权限, 任一命中即可见)。
+    -- 应用只读不写, 由 seed.sql 搬迁后清空; 保留一段时间只为升级已有库。
     permission_id BIGINT       NULL,
     enabled       BOOLEAN      NOT NULL DEFAULT TRUE,
     locked        BOOLEAN      NOT NULL DEFAULT FALSE,
@@ -236,7 +237,7 @@ COMMENT ON COLUMN menus.icon IS '图标名';
 COMMENT ON COLUMN menus.sort IS '同级排序, 升序';
 COMMENT ON COLUMN menus.hidden IS '在侧边栏隐藏(但仍可路由, 用于详情页)';
 COMMENT ON COLUMN menus.keep_alive IS '前端是否缓存该页面';
-COMMENT ON COLUMN menus.permission_id IS '所需权限, 关联 permissions.id; NULL 表示登录即可见';
+COMMENT ON COLUMN menus.permission_id IS '已废弃的旧单权限列, 仅作迁移兜底; 门禁见 menu_permissions';
 COMMENT ON COLUMN menus.enabled IS '是否启用';
 COMMENT ON COLUMN menus.locked IS '人工锁定: TRUE-自注册不得覆盖';
 COMMENT ON COLUMN menus.source IS '来源: MANUAL-人工 REGISTERED-自注册';
@@ -246,6 +247,40 @@ COMMENT ON COLUMN menus.update_by IS '更新人ID';
 COMMENT ON COLUMN menus.update_time IS '更新时间';
 COMMENT ON COLUMN menus.deleted IS '逻辑删除: 0-未删除 1-已删除';
 COMMENT ON COLUMN menus.version IS '乐观锁版本号';
+
+-- ------------------------------------------------------------
+-- 菜单-权限关联表
+-- 一个菜单可挂多条; 持有任意一条权限即可见(OR)。
+-- 没有行 = 登录即可见。
+-- ------------------------------------------------------------
+CREATE TABLE menu_permissions
+(
+    menu_id       BIGINT    NOT NULL,
+    permission_id BIGINT    NOT NULL,
+
+    create_by     BIGINT    NULL,
+    create_time   TIMESTAMP NULL,
+    update_by     BIGINT    NULL,
+    update_time   TIMESTAMP NULL,
+    deleted       INTEGER   NOT NULL DEFAULT 0,
+    version       INTEGER   NOT NULL DEFAULT 0,
+
+    PRIMARY KEY (menu_id, permission_id),
+    CONSTRAINT fk_menu_permissions_menu FOREIGN KEY (menu_id) REFERENCES menus (id),
+    CONSTRAINT fk_menu_permissions_permission FOREIGN KEY (permission_id) REFERENCES permissions (id)
+);
+
+CREATE INDEX idx_menu_permissions_permission_id ON menu_permissions (permission_id);
+
+COMMENT ON TABLE menu_permissions IS '菜单-权限关联表; 任一命中即可见, 无行表示登录即可见';
+COMMENT ON COLUMN menu_permissions.menu_id IS '菜单ID, 关联 menus.id';
+COMMENT ON COLUMN menu_permissions.permission_id IS '权限ID, 关联 permissions.id';
+COMMENT ON COLUMN menu_permissions.create_by IS '创建人ID';
+COMMENT ON COLUMN menu_permissions.create_time IS '创建时间';
+COMMENT ON COLUMN menu_permissions.update_by IS '更新人ID';
+COMMENT ON COLUMN menu_permissions.update_time IS '更新时间';
+COMMENT ON COLUMN menu_permissions.deleted IS '逻辑删除标记; 本表所有删除都是物理 DELETE, 不应出现 1';
+COMMENT ON COLUMN menu_permissions.version IS '乐观锁版本号';
 
 -- ------------------------------------------------------------
 -- 网关路由(只负责转发, 不负责鉴权)

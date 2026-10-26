@@ -69,9 +69,13 @@ export interface MenuNode {
   /** 在侧边栏隐藏（但仍可路由，用于详情页） */
   hidden: boolean
   keepAlive: boolean
-  permissionId: string | null
-  /** 所需权限的键；null 表示登录即可见 */
-  permissionKey: string | null
+  /** 门禁权限 id；空数组表示登录即可见。持有任意一个即可见 */
+  permissionIds: string[]
+  /**
+   * 与 permissionIds 同长度、同顺序的权限键。
+   * 某个位置为 null 表示那条权限行已不存在（该关联不授权，但不能因此错位）。
+   */
+  permissionKeys: (string | null)[]
   enabled: boolean
   locked: boolean
   source: string

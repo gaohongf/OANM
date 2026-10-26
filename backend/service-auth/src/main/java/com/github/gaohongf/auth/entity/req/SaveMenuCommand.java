@@ -1,5 +1,7 @@
 package com.github.gaohongf.auth.entity.req;
 
+import java.util.List;
+
 import org.hibernate.validator.constraints.Length;
 
 import com.github.gaohongf.auth.rsm.AuthRsm;
@@ -55,7 +57,19 @@ public class SaveMenuCommand {
 
     private Boolean keepAlive;
 
-    /** 所需权限 id; {@code null} 表示登录即可见 */
+    /**
+     * 门禁权限 id 集合; {@code null} 或空数组表示登录即可见。
+     * <p>
+     * 语义是"整体替换": 保存时以这一份为准, 不在其中的关联会被删掉。
+     * 持有其中<b>任意一个</b>权限即可见。
+     */
+    private List<Long> permissionIds;
+
+    /**
+     * 过渡期兼容旧前端: 旧请求只发单个权限 id。
+     * <p>
+     * 仅在 {@link #permissionIds} 为 {@code null} 时使用; 新前端发数组后这个字段不在考虑范围内。
+     */
     private Long permissionId;
 
     private Boolean enabled;

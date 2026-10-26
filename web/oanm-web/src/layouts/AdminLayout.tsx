@@ -1,4 +1,4 @@
-import { Suspense, useMemo, useState } from 'react'
+import { Suspense, useEffect, useMemo, useState } from 'react'
 import { Link, Outlet, useLocation, useNavigate } from 'react-router'
 import {
   App as AntdApp,
@@ -32,6 +32,7 @@ import { MessageBell } from '../components/MessageBell'
 import { collectPageNodes, type PageNode } from '../router/buildRoutes'
 import { useAuthStore } from '../store/auth'
 import { resolveIcon } from './menuIcons'
+import './adminLayout.css'
 
 interface NicknameForm {
   nickname: string
@@ -90,19 +91,29 @@ export function AdminLayout() {
     [pageNodes, location.pathname],
   )
 
-  // 展开状态按路径分别记：首次进入某页用推导出的默认值（当前分组，
-  // 首页这种不在菜单里的路径则展开一级分组）；用户手动开合后，以手动结果为准。
-  // 这样不需要在 effect 里同步路由，也不会因为路由变化把用户的展开状态冲掉。
-  const [openKeysByPath, setOpenKeysByPath] = useState<Record<string, string[]>>({})
-  const defaultOpenKeys = useMemo(
-    () => (routeOpenKeys.length > 0 ? routeOpenKeys : toDirectoryKeys(pageNodes)),
-    [routeOpenKeys, pageNodes],
+  // 展开状态只对"当前这一次停留"有效：切到别的路径就回到按路由推导的默认值 ——
+  // 只展开当前页所在的分组；像「概览」这种顶级页面（或不在菜单里的详情页）不展开任何分组。
+  //
+  // 刻意不按路径长期记住：手动展开某个分组，多半只是为了点进它，这个 key 会被记在
+  // **当前页**名下；下次回到这一页时它又被放出来，表现为"点过知识文章再点菜单管理，
+  // 知识库一直不收起；点一下角色管理才收起，再点菜单管理又放出来"。
+  // 记住 path 是为了区分"手动结果"和"切页后的默认值"，而不是为了跨页复用。
+  const [manualOpenKeys, setManualOpenKeys] = useState<{ path: string; keys: string[] } | null>(
+    null,
   )
-  const openKeys = openKeysByPath[location.pathname] ?? defaultOpenKeys
+  const openKeys =
+    manualOpenKeys?.path === location.pathname ? manualOpenKeys.keys : routeOpenKeys
 
   const onOpenChange = (keys: string[]) => {
-    setOpenKeysByPath((current) => ({ ...current, [location.pathname]: keys }))
+    setManualOpenKeys({ path: location.pathname, keys })
   }
+
+  // 切页后丢弃手动开合。只比较 pathname 是不够的：离开 A 页再回到 A 页时,
+  // 那条旧状态还会命中同一个路径（这正是上面注释里那个"来回放出子节点"的现象）。
+  useEffect(() => {
+    // eslint-disable-next-line react/set-state-in-effect -- 丢弃上一页的展开状态, 只影响侧栏
+    setManualOpenKeys(null)
+  }, [location.pathname])
 
   const breadcrumbItems = useMemo(() => toBreadcrumb(pageNodes, location.pathname), [pageNodes, location.pathname])
 
@@ -406,10 +417,8 @@ function toMenuItems(nodes: PageNode[]): NonNullable<MenuProps['items']> {
     .filter((node) => !node.hidden)
     .map((node) => {
       const children = toMenuItems(node.children)
-      // 目录节点（没有页面）用 key 但不可点击 —— 它的路径是空的
-      const key = node.component ? node.path : `dir:${node.name}`
       return {
-        key,
+        key: menuKey(node),
         icon: resolveIcon(node.icon),
         label: node.component ? <Link to={node.path}>{node.name}</Link> : node.name,
         children: children.length > 0 ? children : undefined,
@@ -417,14 +426,19 @@ function toMenuItems(nodes: PageNode[]): NonNullable<MenuProps['items']> {
     })
 }
 
-/** 一级分组 key。没有命中当前路由时，侧栏默认展开这些分组 */
-function toDirectoryKeys(nodes: PageNode[]): string[] {
-  return nodes
-    .filter((node) => !node.hidden && !node.component && node.children.length > 0)
-    .map((node) => `dir:${node.name}`)
+/**
+ * 菜单项 key。
+ *
+ * 页面节点（有 `component`）用它的路由；目录节点没有路由，用 `dir:<名称>`。
+ * **有子节点的页面节点在 antd 里同样渲染成 SubMenu**，key 仍然是它的路由 ——
+ * 展开状态的推导必须用同一个 key，否则自动展开会落空（菜单拖拽后目录结构会变，
+ * 这类"页面 + 子节点"的节点会真实出现）。
+ */
+function menuKey(node: PageNode): string {
+  return node.component ? node.path : `dir:${node.name}`
 }
 
-/** 当前路径 → 它所属的分组 key（`dir:<名称>`），用于自动展开侧栏 */
+/** 当前路径 → 它所属的分组 key，用于自动展开侧栏 */
 function toOpenKeys(nodes: PageNode[], pathname: string): string[] {
   const walk = (list: PageNode[], ancestors: string[]): string[] | null => {
     for (const node of list) {
@@ -432,7 +446,7 @@ function toOpenKeys(nodes: PageNode[], pathname: string): string[] {
         return ancestors
       }
       if (node.children.length > 0) {
-        const found = walk(node.children, [...ancestors, `dir:${node.name}`])
+        const found = walk(node.children, [...ancestors, menuKey(node)])
         if (found) {
           return found
         }

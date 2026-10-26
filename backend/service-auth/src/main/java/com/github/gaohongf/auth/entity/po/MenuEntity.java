@@ -1,6 +1,8 @@
 package com.github.gaohongf.auth.entity.po;
 
+import com.baomidou.mybatisplus.annotation.FieldStrategy;
 import com.baomidou.mybatisplus.annotation.IdType;
+import com.baomidou.mybatisplus.annotation.TableField;
 import com.baomidou.mybatisplus.annotation.TableId;
 import com.baomidou.mybatisplus.annotation.TableName;
 import com.github.gaohongf.model.BaseEntity;
@@ -54,11 +56,14 @@ public class MenuEntity extends BaseEntity {
     private Boolean keepAlive;
 
     /**
-     * 所需权限; {@code null} 表示登录即可见。
+     * 旧版单权限列。现在只作<b>迁移期只读兜底</b>: 应用不写它, {@code seed.sql} 把它
+     * 搬到 {@code menu_permissions} 后清空; 清空之前它的值仍会并入门禁集合,
+     * 避免"关联表还没搬完, 受控菜单先对所有登录用户可见"。
      * <p>
-     * 用外键而不是权限键字符串: 字符串的失效模式是改名后关联静默断开、菜单失去门禁
-     * 变成对所有人可见(fail-open), 外键则改名天然安全。
+     * 新模型见 {@code menu_permissions}: 一个菜单可以挂多个权限, 任一命中即可见。
+     * 用外键而不是权限键字符串, 是因为字符串改名后会静默断开、菜单失去门禁(fail-open)。
      */
+    @TableField(insertStrategy = FieldStrategy.NEVER, updateStrategy = FieldStrategy.NEVER)
     private Long permissionId;
 
     private Boolean enabled;

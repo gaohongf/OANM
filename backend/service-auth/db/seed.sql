@@ -24,6 +24,36 @@
 -- ============================================================
 
 -- ------------------------------------------------------------
+-- 0. 菜单-权限关联表
+--
+--    seed 也要能单独升级已有库, 所以建表放在最前面: 6.3 / 7 的旧数据清理
+--    和 11 的搬迁都要用它。
+--
+--    CREATE TABLE IF NOT EXISTS 修不了"表已存在但结构不对"的情况。升级老库后
+--    用 \d+ menu_permissions 确认主键 (menu_id, permission_id)、两个外键和索引都在。
+--    这里的定义必须与 schema.sql 保持一致。
+-- ------------------------------------------------------------
+CREATE TABLE IF NOT EXISTS menu_permissions
+(
+    menu_id       BIGINT    NOT NULL,
+    permission_id BIGINT    NOT NULL,
+
+    create_by     BIGINT    NULL,
+    create_time   TIMESTAMP NULL,
+    update_by     BIGINT    NULL,
+    update_time   TIMESTAMP NULL,
+    deleted       INTEGER   NOT NULL DEFAULT 0,
+    version       INTEGER   NOT NULL DEFAULT 0,
+
+    PRIMARY KEY (menu_id, permission_id),
+    CONSTRAINT fk_menu_permissions_menu FOREIGN KEY (menu_id) REFERENCES menus (id),
+    CONSTRAINT fk_menu_permissions_permission FOREIGN KEY (permission_id) REFERENCES permissions (id)
+);
+
+CREATE INDEX IF NOT EXISTS idx_menu_permissions_permission_id
+    ON menu_permissions (permission_id);
+
+-- ------------------------------------------------------------
 -- 1. admin 角色
 --    roles 的主键是 role_name(String), 没有独立 id。
 -- ------------------------------------------------------------
@@ -208,11 +238,22 @@ WHERE id = -22 AND sort = 2;
 --     新库不会种这两行, 但已经跑起来的库里还留着, 表现为侧栏多一个点进去没内容的菜单、
 --     权限管理里多一条授了也没用的权限。
 --
---     先删菜单、再删角色授权、最后删权限: menus.permission_id 和
---     role_permissions.permission_id 都指向 permissions.id, 顺序反了会被外键挡住。
+--     先删菜单、再删角色授权、最后删权限: menu_permissions.menu_id、
+--     menu_permissions.permission_id 和 role_permissions.permission_id 都指向
+--     这两张表, 顺序反了会被外键挡住。
 --     物理删除而不是置 deleted=1: permission_key 上有唯一键, 墓碑行会让
 --     这个键日后万一重新注册时直接撞唯一键。
+--
+--     注意: 如果某个仍在使用的菜单唯一的门禁正好是被删的权限, 删完它会变成
+--     "登录即可见"。当前种子数据里没有这种菜单; 自己改过菜单的话先确认一下。
+DELETE FROM menu_permissions
+WHERE menu_id IN (SELECT id FROM menus WHERE id = -23 OR component = 'ops/AssistSubmit');
+
 DELETE FROM menus WHERE id = -23 OR component = 'ops/AssistSubmit';
+
+DELETE FROM menu_permissions
+WHERE permission_id IN (SELECT id FROM permissions
+                        WHERE permission_key = 'GET:/api/ai/assistant/wo/assist-submit');
 
 DELETE FROM role_permissions
 WHERE permission_id IN (SELECT id FROM permissions
@@ -272,6 +313,12 @@ WHERE NOT EXISTS (SELECT 1 FROM api_routes WHERE path_pattern = '/api/auth/**');
 --    物理删除而不是置 deleted=1: permissions.permission_key 上有唯一键,
 --    墓碑行会让这个 key 日后重新注册时直接撞唯一键。
 -- ------------------------------------------------------------
+-- 先解除菜单引用(新外键), 再删角色授权, 最后删权限
+DELETE FROM menu_permissions
+WHERE permission_id IN (SELECT id FROM permissions
+                        WHERE permission_key IN ('GET:/api/ai/assistant/wouiii',
+                                                 'GET:/api/ai/assistant/wos'));
+
 DELETE FROM role_permissions
 WHERE permission_id IN (SELECT id FROM permissions
                         WHERE permission_key IN ('GET:/api/ai/assistant/wouiii',
@@ -330,3 +377,160 @@ WHERE NOT EXISTS (SELECT 1 FROM api_routes WHERE path_pattern = '/api/software/*
 INSERT INTO permissions (id, permission_key, label, create_time, update_time, deleted, version)
 SELECT -12, 'POST:/api/files/upload/large', '上传大文件', NOW(), NOW(), 0, 0
 WHERE NOT EXISTS (SELECT 1 FROM permissions WHERE permission_key = 'POST:/api/files/upload/large');
+
+-- ------------------------------------------------------------
+-- 10. 运维知识库
+--
+--    「知识库」只是分组(目录), 下面挂三项:
+--      「知识文章」浏览页 —— 所有登录用户可见, 接口标了 @LoginOnly;
+--      「知识管理」       —— 管理功能, 按权限控制;
+--      「新建文章」       —— 编辑器, 与「知识管理」共用同一个页面门禁。
+--
+--    先种权限、再建菜单: 否则 permission_id 子查询取到 NULL,
+--    子菜单会变成"登录即可见"(静默失去门禁)。
+-- ------------------------------------------------------------
+
+-- 10.1 知识管理页面的权限（页面门禁）。
+--      service-knowledge 启动时也会自注册出这个键; 这里先种一遍,
+--      防止种子脚本先于服务执行时 10.4 / 10.5 的子查询取到 NULL。
+INSERT INTO permissions (id, permission_key, label, create_time, update_time, deleted, version)
+SELECT -13, 'GET:/api/knowledge/manage/articles', '知识管理', NOW(), NOW(), 0, 0
+WHERE NOT EXISTS (SELECT 1 FROM permissions WHERE permission_key = 'GET:/api/knowledge/manage/articles');
+
+--      「新建文章」页面同时服务新建和编辑, 所以门禁是"新建 OR 编辑"两条关联,
+--      任意一条命中即可见(见 11.1)。这两个键由 service-knowledge 自注册;
+--      这里先种一遍, 保证种子脚本先跑时 11.1 也能取到 id。
+INSERT INTO permissions (id, permission_key, label, create_time, update_time, deleted, version)
+SELECT -14, 'POST:/api/knowledge/articles', '新建知识文章', NOW(), NOW(), 0, 0
+WHERE NOT EXISTS (SELECT 1 FROM permissions WHERE permission_key = 'POST:/api/knowledge/articles');
+
+INSERT INTO permissions (id, permission_key, label, create_time, update_time, deleted, version)
+SELECT -15, 'PUT:/api/knowledge/articles/{id}', '编辑知识文章', NOW(), NOW(), 0, 0
+WHERE NOT EXISTS (SELECT 1 FROM permissions WHERE permission_key = 'PUT:/api/knowledge/articles/{id}');
+
+-- 10.2 顶级菜单「知识库」。只作为父菜单(目录): 没有路由和组件, 点它只展开/收起。
+--      permission_id 为 NULL = 所有已登录用户可见, 三个子项各自决定是否出现。
+INSERT INTO menus (id, parent_id, name, path, component, icon, sort, hidden, keep_alive, permission_id, enabled, locked, source, create_time, update_time, deleted, version)
+SELECT -37, NULL, '知识库', NULL, NULL, 'book', 3, FALSE, FALSE, NULL, TRUE, FALSE, 'MANUAL', NOW(), NOW(), 0, 0
+WHERE NOT EXISTS (SELECT 1 FROM menus WHERE id = -37);
+
+--      老库里 -37 是浏览页本身。把它降为下面的「知识文章」:
+--      同一节点既当分组又当页面, 侧栏会变成"点了不跳转、只是展开", 很别扭。
+UPDATE menus SET path = NULL, component = NULL, update_time = NOW()
+WHERE id = -37 AND component = 'knowledge/KnowledgeBase';
+
+-- 10.3 「知识库 → 知识文章」。原来的浏览页, 路由保持 /knowledge 不变。
+--      component 必须与 src/pages/knowledge/KnowledgeBase.tsx 逐字一致。
+INSERT INTO menus (id, parent_id, name, path, component, icon, sort, hidden, keep_alive, permission_id, enabled, locked, source, create_time, update_time, deleted, version)
+SELECT -48, -37, '知识文章', '/knowledge', 'knowledge/KnowledgeBase', 'file', 1, FALSE, FALSE, NULL,
+       TRUE, FALSE, 'MANUAL', NOW(), NOW(), 0, 0
+WHERE NOT EXISTS (SELECT 1 FROM menus WHERE id = -48);
+
+-- 10.4 「知识库 → 知识管理」。
+--      component 对应 src/pages/knowledge/KnowledgeManage.tsx。
+INSERT INTO menus (id, parent_id, name, path, component, icon, sort, hidden, keep_alive, permission_id, enabled, locked, source, create_time, update_time, deleted, version)
+SELECT -38, -37, '知识管理', '/knowledge/manage', 'knowledge/KnowledgeManage', 'appstore', 2, FALSE, FALSE,
+       (SELECT id FROM permissions WHERE permission_key = 'GET:/api/knowledge/manage/articles'),
+       TRUE, FALSE, 'MANUAL', NOW(), NOW(), 0, 0
+WHERE NOT EXISTS (SELECT 1 FROM menus WHERE id = -38);
+
+--      老库里 -38 还挂在「系统管理」下(旧种子), 或拖进「知识库」时排在了末尾。
+--      统一父节点和序号, 保证三项的固定顺序: 知识文章 → 知识管理 → 新建文章。
+UPDATE menus SET parent_id = -37, sort = 2, update_time = NOW()
+WHERE id = -38 AND parent_id IN (-30, -37) AND sort <> 2;
+
+-- 10.5 「知识库 → 新建文章」。编辑器是独立页面, 直接从侧栏进入,
+--      列表页的「新建文章」按钮也仍然保留(跳到同一个路径)。
+--
+--      这个页面同时服务「新建」和「编辑」: 编辑只需要更新权限。若只按新建权限门禁,
+--      只有编辑权限的用户连路由都拿不到, 列表页的「编辑」按钮会变成 404;
+--      若只按「知识管理」列表权限门禁, 完全没有写权限的人也会看到它。
+--      所以最终门禁是"新建 OR 编辑"(11.1), 能不能新建/编辑由页面自己判断。
+--
+--      这里的 INSERT 仍写旧列 permission_id = 「知识管理」列表权限, 有两个作用:
+--        1) 脚本在 11 之前中断时, 这一项仍是受控的, 不会 fail-open;
+--        2) 作为 11.1 的搬迁标记(旧列等于这个默认值 = 还是种子建的默认门禁)。
+--      11.3 会把旧列清空, 应用之后只读 menu_permissions。
+INSERT INTO menus (id, parent_id, name, path, component, icon, sort, hidden, keep_alive, permission_id, enabled, locked, source, create_time, update_time, deleted, version)
+SELECT -39, -37, '新建文章', '/knowledge/manage/editor', 'knowledge/KnowledgeEditor', 'file-add', 3, FALSE, FALSE,
+       (SELECT id FROM permissions WHERE permission_key = 'GET:/api/knowledge/manage/articles'),
+       TRUE, FALSE, 'MANUAL', NOW(), NOW(), 0, 0
+WHERE NOT EXISTS (SELECT 1 FROM menus WHERE id = -39);
+
+--      上一版种子把 -39 挂在「知识管理」下; 这里把它提高到与「知识管理」同级。
+UPDATE menus SET parent_id = -37, sort = 3, update_time = NOW()
+WHERE id = -39 AND parent_id = -38;
+
+-- 10.6 网关路由。按 path_pattern 判重, 避免与手工建过的同前缀路由重复。
+--      route_order 16 接在 software 的 15 后面。
+--      注意: 直接 SQL 插入不会触发路由版本号广播, 网关需要重启一次才会加载。
+INSERT INTO api_routes (id, name, path_pattern, uri, route_order, enabled, locked, source, create_time, update_time, deleted, version)
+SELECT -47, 'Knowledge Service', '/api/knowledge/**', 'lb://service-knowledge', 16, TRUE, FALSE, 'MANUAL', NOW(), NOW(), 0, 0
+WHERE NOT EXISTS (SELECT 1 FROM api_routes WHERE path_pattern = '/api/knowledge/**');
+
+-- ------------------------------------------------------------
+-- 11. 旧单权限列迁移到 menu_permissions
+--
+--     旧模型是 menus.permission_id 一列一个权限。新模型是关联表, 一个菜单可挂多个,
+--     持有任意一个即可见。迁移分三步, 整体放在一个事务里: 半途失败时旧列不会被清空,
+--     菜单不会变成"登录即可见"(fail-open)。
+--
+--     重复执行安全: 第二次跑时旧列已全是 NULL、关联也已存在, 三段都是空操作。
+-- ------------------------------------------------------------
+BEGIN;
+
+-- 11.1 「新建文章」: 旧默认(知识管理列表权限) → 新建 OR 编辑。
+--
+--      触发条件二选一:
+--        a) 旧列仍等于旧默认值(上一版及当前种子执行过的库);
+--        b) 旧列为 NULL 且一条关联都没有(更早一版种子把 -39 建成了无门禁页面)。
+--      管理员在旧界面改成别的门禁时, 旧列既不是旧默认值也不是 NULL, 留给 11.2,
+--      不会被这里覆盖。两个新权限缺任何一个时 count <> 2, 整块不生效, 旧门禁保留。
+--
+--      已知取舍: 迁移后若管理员把这两条关联都删光, 再跑种子会恢复默认值 ——
+--      这是为了修复 (b) 那种旧库。只想删掉一条则不受影响。
+WITH targets AS (
+    SELECT id AS permission_id
+    FROM permissions
+    WHERE permission_key IN ('POST:/api/knowledge/articles',
+                             'PUT:/api/knowledge/articles/{id}')
+      AND deleted = 0
+),
+cleared AS (
+    UPDATE menus
+    SET permission_id = NULL, update_time = NOW()
+    WHERE id = -39
+      AND ( permission_id = (SELECT id FROM permissions
+                             WHERE permission_key = 'GET:/api/knowledge/manage/articles'
+                               AND deleted = 0)
+            OR (permission_id IS NULL
+                AND NOT EXISTS (SELECT 1 FROM menu_permissions mp WHERE mp.menu_id = -39)) )
+      AND (SELECT COUNT(*) FROM targets) = 2
+    RETURNING id
+)
+INSERT INTO menu_permissions
+    (menu_id, permission_id, create_by, create_time, update_by, update_time, deleted, version)
+SELECT c.id, t.permission_id, NULL, NOW(), NULL, NOW(), 0, 0
+FROM cleared c
+         CROSS JOIN targets t
+WHERE NOT EXISTS (SELECT 1 FROM menu_permissions mp
+                  WHERE mp.menu_id = c.id AND mp.permission_id = t.permission_id);
+
+-- 11.2 其余菜单: 旧单权限逐条搬到关联表。
+--      NOT EXISTS 不加 deleted = 0: 这张表所有删除都是物理删除, 不该有墓碑行;
+--      加上反而会让"有墓碑"的菜单被跳过, 留下一个实际不生效的门禁。
+INSERT INTO menu_permissions
+    (menu_id, permission_id, create_by, create_time, update_by, update_time, deleted, version)
+SELECT m.id, m.permission_id, NULL, NOW(), NULL, NOW(), 0, 0
+FROM menus m
+WHERE m.permission_id IS NOT NULL
+  AND NOT EXISTS (SELECT 1 FROM menu_permissions mp
+                  WHERE mp.menu_id = m.id AND mp.permission_id = m.permission_id)
+ON CONFLICT (menu_id, permission_id) DO NOTHING;
+
+-- 11.3 清空旧列: 应用已不再写它, 留着非空值只会误导后来人。
+--      迁移后 SELECT count(*) FROM menus WHERE permission_id IS NOT NULL 必须为 0。
+UPDATE menus SET permission_id = NULL, update_time = NOW()
+WHERE permission_id IS NOT NULL;
+
+COMMIT;

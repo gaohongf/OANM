@@ -2,8 +2,10 @@ import {
   ApiOutlined,
   AppstoreOutlined,
   BellOutlined,
+  BookOutlined,
   DashboardOutlined,
   DownloadOutlined,
+  FileAddOutlined,
   FileDoneOutlined,
   FileTextOutlined,
   RobotOutlined,
@@ -31,6 +33,8 @@ const ICONS: Record<string, ReactNode> = {
   setting: <SettingOutlined />,
   file: <FileTextOutlined />,
   'file-done': <FileDoneOutlined />,
+  // 「新建文章」菜单用的图标（见 service-auth/db/seed.sql 第 10 段）
+  'file-add': <FileAddOutlined />,
   team: <TeamOutlined />,
   user: <UserOutlined />,
   api: <ApiOutlined />,
@@ -40,6 +44,8 @@ const ICONS: Record<string, ReactNode> = {
   bell: <BellOutlined />,
   // 「软件下载」菜单用的图标（见 service-auth/db/seed.sql 第 8 段「自助软件下载」）
   download: <DownloadOutlined />,
+  // 「知识库」菜单用的图标（见 service-auth/db/seed.sql 第 10 段）
+  book: <BookOutlined />,
 }
 
 const DEFAULT_ICON = <AppstoreOutlined />
