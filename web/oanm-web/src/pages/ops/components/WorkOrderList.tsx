@@ -6,6 +6,7 @@ import {
   Card,
   Descriptions,
   Drawer,
+  Dropdown,
   Empty,
   Input,
   Modal,
@@ -18,7 +19,15 @@ import {
   Tag,
   Typography,
 } from 'antd'
-import { PlusOutlined, ReloadOutlined, SearchOutlined } from '@ant-design/icons'
+import type { MenuProps } from 'antd'
+import {
+  DownOutlined,
+  EditOutlined,
+  PlusOutlined,
+  ReloadOutlined,
+  SearchOutlined,
+  ThunderboltOutlined,
+} from '@ant-design/icons'
 import { useNavigate, useSearchParams } from 'react-router'
 
 import { AI_PERMISSIONS } from '../../../api/ai'
@@ -45,6 +54,7 @@ import type {
 } from '../../../api/workOrder'
 import { Auth } from '../../../permission/Auth'
 import { useAuthStore } from '../../../store/auth'
+import { ManualWorkOrderDrawer } from './ManualWorkOrderDrawer'
 import { PriorityTag, StatusTag, TypeTag, UserCell } from './WorkOrderCells'
 
 const { Text, Paragraph } = Typography
@@ -90,6 +100,9 @@ export function WorkOrderList({ mode }: WorkOrderListProps) {
   // 降级成裸数字时判断不可靠（雪花 id 可能已经丢精度），宁可不显示，
   // 也不要把“结单”显示给一个其实不是受理人的人 —— 后端仍会兜底拒绝。
   const currentUserId = useAuthStore((state) => state.user?.id)
+  // 建单的两条路各有自己的权限。下拉项是数据，没法用 <Auth> 包，所以直接取布尔值。
+  const canUseAi = useAuthStore((state) => state.can(AI_PERMISSIONS.intentInference))
+  const canCreate = useAuthStore((state) => state.can(WORK_ORDER_PERMISSIONS.create))
 
   const [rows, setRows] = useState<WorkOrderRow[]>([])
   const [total, setTotal] = useState(0)
@@ -101,6 +114,7 @@ export function WorkOrderList({ mode }: WorkOrderListProps) {
   const [loading, setLoading] = useState(true)
 
   const [drawerOpen, setDrawerOpen] = useState(false)
+  const [manualOpen, setManualOpen] = useState(false)
   const [detail, setDetail] = useState<WorkOrderDetail | null>(null)
   const [detailLoading, setDetailLoading] = useState(false)
   const [searchParams, setSearchParams] = useSearchParams()
@@ -149,6 +163,37 @@ export function WorkOrderList({ mode }: WorkOrderListProps) {
     // eslint-disable-next-line react/set-state-in-effect
     void load({ silent: true })
   }, [load])
+
+  /**
+   * 手动建单成功后让新单出现在列表里。
+   *
+   * 新单按创建时间倒序，一定在第 1 页；「我的工单」如果正停在「我受理的」，
+   * 刚提交的单也不在那个范围里，所以切回「我提交的」。这两处 state 变化会让
+   * 上面的 effect 重新拉一次；两者都没变时（本来就在第 1 页、本来就在看我提交的），
+   * state 不会变，effect 不会触发，需要手动拉一次。
+   */
+  const onManualCreated = () => {
+    const switchingScope = mode === 'mine' && mineScope !== 'created'
+    const leavingFirstPage = current !== 1
+    if (switchingScope) {
+      setMineScope('created')
+    }
+    if (leavingFirstPage) {
+      setCurrent(1)
+    }
+    if (!switchingScope && !leavingFirstPage) {
+      void load()
+    }
+  }
+
+  // 两个入口按权限各自显示：有智能提单权限才出现 AI 路，有建单权限才出现手动路。
+  const createMenuItems: MenuProps['items'] = []
+  if (canUseAi) {
+    createMenuItems.push({ key: 'ai', icon: <ThunderboltOutlined />, label: '智能提单' })
+  }
+  if (canCreate) {
+    createMenuItems.push({ key: 'manual', icon: <EditOutlined />, label: '手动填写' })
+  }
 
   const openDetailById = useCallback(
     async (id: string) => {
@@ -393,12 +438,28 @@ export function WorkOrderList({ mode }: WorkOrderListProps) {
           <Button icon={<ReloadOutlined />} onClick={() => void load()}>
             刷新
           </Button>
-          {/* 建单目前只有 AI 这条路径，所以按钮直接把人送到智能提单的第一步 */}
-          <Auth code={AI_PERMISSIONS.intentInference}>
-            <Button type="primary" icon={<PlusOutlined />} onClick={() => navigate('/ops/ai/intent')}>
-              新建工单
-            </Button>
-          </Auth>
+          {/* 建单有两条路：AI 先理解问题再填，或自己逐项填写。
+              没有配置 AI key 时手动入口仍可正常提交，两个入口按各自权限显示 */}
+          {createMenuItems.length > 0 && (
+            <Dropdown
+              trigger={['click']}
+              menu={{
+                items: createMenuItems,
+                onClick: ({ key }) => {
+                  if (key === 'ai') {
+                    navigate('/ops/ai/intent')
+                  } else if (key === 'manual') {
+                    setManualOpen(true)
+                  }
+                },
+              }}
+            >
+              <Button type="primary" icon={<PlusOutlined />}>
+                新建工单
+                <DownOutlined style={{ marginInlineStart: 4, fontSize: 10 }} />
+              </Button>
+            </Dropdown>
+          )}
         </Space>
       }
     >
@@ -735,6 +796,12 @@ export function WorkOrderList({ mode }: WorkOrderListProps) {
           </Space>
         )}
       </Drawer>
+
+      <ManualWorkOrderDrawer
+        open={manualOpen}
+        onClose={() => setManualOpen(false)}
+        onCreated={onManualCreated}
+      />
 
       <Modal
         title={dispatchTarget?.assigneeId === null ? '派发工单' : '改派工单'}
