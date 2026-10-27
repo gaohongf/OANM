@@ -1,0 +1,17 @@
+# 公共配置：数据源 + MyBatis-Plus + Redis。
+#
+# 所有业务服务共用这一份。中间件都由 compose 起在宿主机上，
+# 因此 Redis 默认指向 127.0.0.1，可用环境变量覆盖。
+mybatis-plus:
+  mapper-locations: "classpath*:/mapper/**/*.xml"
+
+spring:
+  datasource:
+    username: ${db.username}
+    password: ${db.password}
+    driver-class-name: org.postgresql.Driver
+    url: ${db.url}
+  data:
+    redis:
+      host: ${REDIS_HOST:127.0.0.1}
+      port: ${REDIS_PORT:6379}

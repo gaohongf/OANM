@@ -1,0 +1,19 @@
+# 大模型配置。
+#
+# api-key 不要写进仓库。启动 service-ai 前在本机设置环境变量 AI_API_KEY 即可
+#（IntelliJ 的 Run Configuration、或 shell 里 export）；没设置时用占位符启动，
+# 意图推断/工单生成会调用失败，其余功能不受影响。
+# base-url 与 model 同理，可用 AI_BASE_URL / AI_MODEL 覆盖。
+spring:
+  ai:
+    openai:
+      api-key: ${AI_API_KEY:your-api-key}
+      base-url: ${AI_BASE_URL:https://api.deepseek.com}
+      chat:
+        options:
+          model: ${AI_MODEL:deepseek-flash}
+          temperature: 0.7
+oanm:
+oanm:
+  auth:
+    enabled: true

@@ -1,0 +1,9 @@
+# 与 service-auth 保持一致：token 要在所有服务间通用。
+sa-token:
+  token-name: satoken
+  timeout: 2592000
+  active-timeout: -1
+  is-concurrent: true
+  is-share: false
+  token-style: uuid
+  is-log: true

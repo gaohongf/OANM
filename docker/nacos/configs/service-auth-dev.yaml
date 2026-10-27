@@ -1,0 +1,9 @@
+# sa-token 会话配置。各服务必须一致，否则一个服务签发的 token 另一个认不出来。
+sa-token:
+  token-name: satoken
+  timeout: 2592000
+  active-timeout: -1
+  is-concurrent: true
+  is-share: false
+  token-style: uuid
+  is-log: true

@@ -1,0 +1,145 @@
+# OANM 本地开发用的中间件一键启动。
+#
+#   docker compose up -d
+#
+# 只启动 PostgreSQL、Redis、Kafka、Nacos 四个中间件，后端与前端仍在本机运行
+#（见 README 的「手动启动」）。因此这里的端口、监听地址都按宿主机来配：
+# 业务服务连的是 localhost:5432 / 6379 / 9092 / 8848。
+#
+# 端口沿用本地开发的那一套，启动前请先停掉本机正在运行的 Nacos / PostgreSQL /
+# Redis / Kafka，否则会端口冲突。
+#
+# Nacos 里的配置不随仓库走（原本只存在于开发机的 Nacos）。这里由 nacos-init
+# 在每次启动时把 docker/nacos/configs 发布进去，省去手工新建配置。
+
+name: oanm
+
+services:
+  postgres:
+    # 用 pgvector 镜像而不是官方 postgres:18：它是基于 postgres:18 加装 vector 扩展，
+    # 其余用法完全一致。知识库的语义检索要用到它，提前统一成本机同款，
+    # 避免以后换镜像重建数据卷。
+    image: pgvector/pgvector:pg18
+    restart: unless-stopped
+    environment:
+      POSTGRES_DB: oanm
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: ${DB_PASSWORD:-postgres}
+    ports:
+      - "5432:5432"
+    volumes:
+      # PostgreSQL 18 官方镜像的 PGDATA 是 /var/lib/postgresql/18/docker，
+      # 数据卷要挂在它的父目录 /var/lib/postgresql 上（不是旧的 .../data）
+      - pg-data:/var/lib/postgresql
+      # 数据库脚本按文件名顺序执行；只在空数据卷上跑一次。
+      # 与 README 的手工初始化顺序一致，最后一个脚本负责建默认管理员。
+      - ./backend/service-auth/db/schema.sql:/docker-entrypoint-initdb.d/01-auth-schema.sql:ro
+      - ./backend/service-auth/db/seed.sql:/docker-entrypoint-initdb.d/02-auth-seed.sql:ro
+      - ./backend/service-work-order/db/schema.sql:/docker-entrypoint-initdb.d/03-work-order-schema.sql:ro
+      - ./backend/service-message/db/schema.sql:/docker-entrypoint-initdb.d/04-message-schema.sql:ro
+      - ./backend/service-message/db/seed.sql:/docker-entrypoint-initdb.d/05-message-seed.sql:ro
+      - ./backend/service-files/db/schema.sql:/docker-entrypoint-initdb.d/06-files-schema.sql:ro
+      - ./backend/service-software/db/schema.sql:/docker-entrypoint-initdb.d/07-software-schema.sql:ro
+      - ./backend/service-software/db/seed.sql:/docker-entrypoint-initdb.d/08-software-seed.sql:ro
+      - ./backend/service-knowledge/db/schema.sql:/docker-entrypoint-initdb.d/09-knowledge-schema.sql:ro
+      - ./backend/service-knowledge/db/seed.sql:/docker-entrypoint-initdb.d/10-knowledge-seed.sql:ro
+      - ./docker/initdb/90-init-admin.sql:/docker-entrypoint-initdb.d/90-init-admin.sql:ro
+    healthcheck:
+      # 必须走 TCP：初始化脚本执行期间 entrypoint 会起一个只监听 Unix socket 的临时实例，
+      # 不带 -h 的 pg_isready 会在那时就返回成功，业务服务提前连上来会失败。
+      test: ["CMD-SHELL", "pg_isready -h 127.0.0.1 -U postgres -d oanm"]
+      interval: 5s
+      timeout: 5s
+      retries: 20
+      start_period: 10s
+
+  redis:
+    image: redis:latest
+    restart: unless-stopped
+    # 会话（sa-token）存在 Redis 里，开 AOF 让重启后登录态不丢
+    command: ["redis-server", "--appendonly", "yes"]
+    ports:
+      - "6379:6379"
+    volumes:
+      - redis-data:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 3s
+      retries: 20
+
+  kafka:
+    image: apache/kafka:latest
+    restart: unless-stopped
+    environment:
+      KAFKA_NODE_ID: 1
+      KAFKA_PROCESS_ROLES: broker,controller
+      # 内部监听 9093：容器网络内使用；外部监听 9092：本机运行的服务连 localhost:9092
+      # 控制面 9094：只在容器网络内
+      KAFKA_LISTENERS: INTERNAL://0.0.0.0:9093,EXTERNAL://0.0.0.0:9092,CONTROLLER://0.0.0.0:9094
+      KAFKA_ADVERTISED_LISTENERS: INTERNAL://kafka:9093,EXTERNAL://localhost:9092
+      KAFKA_LISTENER_SECURITY_PROTOCOL_MAP: INTERNAL:PLAINTEXT,EXTERNAL:PLAINTEXT,CONTROLLER:PLAINTEXT
+      KAFKA_INTER_BROKER_LISTENER_NAME: INTERNAL
+      KAFKA_CONTROLLER_LISTENER_NAMES: CONTROLLER
+      KAFKA_CONTROLLER_QUORUM_VOTERS: 1@kafka:9094
+      KAFKA_OFFSETS_TOPIC_REPLICATION_FACTOR: 1
+      KAFKA_TRANSACTION_STATE_LOG_REPLICATION_FACTOR: 1
+      KAFKA_TRANSACTION_STATE_LOG_MIN_ISR: 1
+      KAFKA_GROUP_INITIAL_REBALANCE_DELAY_MS: 0
+      # 端点自注册 / 消息通知的 topic 在首次发送时自动创建
+      KAFKA_AUTO_CREATE_TOPICS_ENABLE: "true"
+      KAFKA_HEAP_OPTS: "-Xms256m -Xmx512m"
+    ports:
+      - "9092:9092"
+    volumes:
+      - kafka-data:/var/lib/kafka/data
+    healthcheck:
+      test: ["CMD-SHELL", "bash -c 'exec 3<>/dev/tcp/127.0.0.1/9093'"]
+      interval: 10s
+      timeout: 5s
+      retries: 20
+      start_period: 30s
+
+  nacos:
+    image: nacos/nacos-server:v2.3.1
+    restart: unless-stopped
+    environment:
+      MODE: standalone
+      PREFER_HOST_MODE: hostname
+      NACOS_AUTH_ENABLE: "false"
+      # 默认堆比较大，开发机上容易和 IDE 抢内存
+      JVM_XMS: 256m
+      JVM_XMX: 512m
+      JVM_XMN: 128m
+      TZ: Asia/Shanghai
+    ports:
+      - "8848:8848"   # HTTP / 控制台
+      - "9848:9848"   # 2.x 客户端 gRPC
+      - "9849:9849"   # 2.x 集群 gRPC（单机也开放，便于宿主机上的服务接入）
+    volumes:
+      - nacos-data:/home/nacos/data
+    healthcheck:
+      test: ["CMD", "curl", "-fsS", "http://127.0.0.1:8848/nacos/v1/console/health/readiness"]
+      interval: 5s
+      timeout: 5s
+      retries: 30
+      start_period: 30s
+
+  # 一次性任务：等 Nacos 就绪后发布配置，完成后退出。
+  # 配置内容就是本机开发用的那一份（数据库、Redis 都指向 127.0.0.1）。
+  nacos-init:
+    image: curlimages/curl:8.10.1
+    restart: "no"
+    depends_on:
+      nacos:
+        condition: service_healthy
+    entrypoint: ["sh", "/scripts/import.sh"]
+    volumes:
+      - ./docker/nacos/import.sh:/scripts/import.sh:ro
+      - ./docker/nacos/configs:/configs:ro
+
+volumes:
+  pg-data:
+  redis-data:
+  nacos-data:
+  kafka-data:

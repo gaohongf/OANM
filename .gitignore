@@ -29,9 +29,9 @@ replay_pid*
 .env
 
 # 本地开发用的中间件编排（PostgreSQL/Redis/Kafka/Nacos），不随仓库分发
-docker/*
-docker-compose.yml
-.env.example
+# docker/*
+# docker-compose.yml
+# .env.example
 # IDE
 .vscode/*
 !.vscode/extensions.json

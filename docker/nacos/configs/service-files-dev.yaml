@@ -1,0 +1,23 @@
+# 文件存储。
+#
+# storage-path 是本机开发用的目录，与直接在本机跑 service-files 时一致；
+# 换机器时改这一行即可。domain 用相对地址 /file/，浏览器按同源访问，
+# 由网关的 /file/** 路由转发回本服务。
+dromara:
+  x-file-storage:
+    local-plus:
+      - platform: local-plus-1
+        enable-storage: true
+        enable-access: true
+        domain: /file/
+        path-patterns: /file/**
+        storage-path: E:/xfile/oanm/
+
+sa-token:
+  token-name: satoken
+  timeout: 2592000
+  active-timeout: -1
+  is-concurrent: true
+  is-share: false
+  token-style: uuid
+  is-log: true
