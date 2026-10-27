@@ -1,0 +1,228 @@
+{
+  // 一键拉起前后端：先构建 common，再并行启动 8 个后端服务与前端。
+  // 除 service-auth 外，其余服务（含 api-gateway）都会等 8084 能响应后再开始构建启动，
+  // 因为它们在启动阶段就会调用 auth，auth 没起来时先启动会直接报错；前端则等网关 8080。
+  //
+  // 项目 pom 里没有声明 spring-boot-maven-plugin，这里用全限定坐标调用，
+  // 版本必须与 backend/pom.xml 的 spring-boot.version 一致（当前 3.5.15）。
+  // 各服务从本地仓库读取 common，所以启动前先 clean install 一次 common；
+  // 每个模块启动前也 clean，避免 IDE 编译器留在 target/classes 里的错误桩被带进运行期。
+  "version": "2.0.0",
+  "tasks": [
+    {
+      "label": "构建 common",
+      "type": "shell",
+      "command": "mvn -pl common clean install -DskipTests",
+      "options": {
+        "cwd": "${workspaceFolder}/backend",
+        "shell": {
+          "executable": "powershell.exe",
+          "args": ["-NoLogo", "-NoProfile", "-ExecutionPolicy", "Bypass", "-Command"]
+        }
+      },
+      "problemMatcher": [],
+      "presentation": {
+        "reveal": "always",
+        "panel": "dedicated",
+        "clear": true
+      }
+    },
+    {
+      "label": "启动 service-auth",
+      "type": "shell",
+      "command": "mvn -pl service-auth clean org.springframework.boot:spring-boot-maven-plugin:3.5.15:run",
+      "options": {
+        "cwd": "${workspaceFolder}/backend",
+        "shell": {
+          "executable": "powershell.exe",
+          "args": ["-NoLogo", "-NoProfile", "-ExecutionPolicy", "Bypass", "-Command"]
+        }
+      },
+      "problemMatcher": [],
+      "presentation": {
+        "reveal": "silent",
+        "panel": "dedicated",
+        "clear": true
+      }
+    },
+    {
+      "label": "启动 api-gateway",
+      // 等 8084 能响应 HTTP 再开始构建启动。用端口而不是固定 sleep：
+      // auth 起得快就不会白等，起得慢也不会抢跑。
+      "type": "shell",
+      "command": "Write-Host 'waiting for service-auth on 8084 ...'; while ($true) { curl.exe -s -o NUL --max-time 2 http://127.0.0.1:8084/; if ($LASTEXITCODE -eq 0) { break }; Start-Sleep -Seconds 2 }; mvn -pl api-gateway clean org.springframework.boot:spring-boot-maven-plugin:3.5.15:run",
+      "options": {
+        "cwd": "${workspaceFolder}/backend",
+        "shell": {
+          "executable": "powershell.exe",
+          "args": ["-NoLogo", "-NoProfile", "-ExecutionPolicy", "Bypass", "-Command"]
+        }
+      },
+      "problemMatcher": [],
+      "presentation": {
+        "reveal": "silent",
+        "panel": "dedicated",
+        "clear": true
+      }
+    },
+    {
+      "label": "启动 service-work-order",
+      "type": "shell",
+      "command": "Write-Host 'waiting for service-auth on 8084 ...'; while ($true) { curl.exe -s -o NUL --max-time 2 http://127.0.0.1:8084/; if ($LASTEXITCODE -eq 0) { break }; Start-Sleep -Seconds 2 }; mvn -pl service-work-order clean org.springframework.boot:spring-boot-maven-plugin:3.5.15:run",
+      "options": {
+        "cwd": "${workspaceFolder}/backend",
+        "shell": {
+          "executable": "powershell.exe",
+          "args": ["-NoLogo", "-NoProfile", "-ExecutionPolicy", "Bypass", "-Command"]
+        }
+      },
+      "problemMatcher": [],
+      "presentation": {
+        "reveal": "silent",
+        "panel": "dedicated",
+        "clear": true
+      }
+    },
+    {
+      "label": "启动 service-ai",
+      "type": "shell",
+      "command": "Write-Host 'waiting for service-auth on 8084 ...'; while ($true) { curl.exe -s -o NUL --max-time 2 http://127.0.0.1:8084/; if ($LASTEXITCODE -eq 0) { break }; Start-Sleep -Seconds 2 }; mvn -pl service-ai clean org.springframework.boot:spring-boot-maven-plugin:3.5.15:run",
+      "options": {
+        "cwd": "${workspaceFolder}/backend",
+        "shell": {
+          "executable": "powershell.exe",
+          "args": ["-NoLogo", "-NoProfile", "-ExecutionPolicy", "Bypass", "-Command"]
+        }
+      },
+      "problemMatcher": [],
+      "presentation": {
+        "reveal": "silent",
+        "panel": "dedicated",
+        "clear": true
+      }
+    },
+    {
+      "label": "启动 service-message",
+      "type": "shell",
+      "command": "Write-Host 'waiting for service-auth on 8084 ...'; while ($true) { curl.exe -s -o NUL --max-time 2 http://127.0.0.1:8084/; if ($LASTEXITCODE -eq 0) { break }; Start-Sleep -Seconds 2 }; mvn -pl service-message clean org.springframework.boot:spring-boot-maven-plugin:3.5.15:run",
+      "options": {
+        "cwd": "${workspaceFolder}/backend",
+        "shell": {
+          "executable": "powershell.exe",
+          "args": ["-NoLogo", "-NoProfile", "-ExecutionPolicy", "Bypass", "-Command"]
+        }
+      },
+      "problemMatcher": [],
+      "presentation": {
+        "reveal": "silent",
+        "panel": "dedicated",
+        "clear": true
+      }
+    },
+    {
+      "label": "启动 service-files",
+      "type": "shell",
+      "command": "Write-Host 'waiting for service-auth on 8084 ...'; while ($true) { curl.exe -s -o NUL --max-time 2 http://127.0.0.1:8084/; if ($LASTEXITCODE -eq 0) { break }; Start-Sleep -Seconds 2 }; mvn -pl service-files clean org.springframework.boot:spring-boot-maven-plugin:3.5.15:run",
+      "options": {
+        "cwd": "${workspaceFolder}/backend",
+        "shell": {
+          "executable": "powershell.exe",
+          "args": ["-NoLogo", "-NoProfile", "-ExecutionPolicy", "Bypass", "-Command"]
+        }
+      },
+      "problemMatcher": [],
+      "presentation": {
+        "reveal": "silent",
+        "panel": "dedicated",
+        "clear": true
+      }
+    },
+    {
+      "label": "启动 service-software",
+      "type": "shell",
+      "command": "Write-Host 'waiting for service-auth on 8084 ...'; while ($true) { curl.exe -s -o NUL --max-time 2 http://127.0.0.1:8084/; if ($LASTEXITCODE -eq 0) { break }; Start-Sleep -Seconds 2 }; mvn -pl service-software clean org.springframework.boot:spring-boot-maven-plugin:3.5.15:run",
+      "options": {
+        "cwd": "${workspaceFolder}/backend",
+        "shell": {
+          "executable": "powershell.exe",
+          "args": ["-NoLogo", "-NoProfile", "-ExecutionPolicy", "Bypass", "-Command"]
+        }
+      },
+      "problemMatcher": [],
+      "presentation": {
+        "reveal": "silent",
+        "panel": "dedicated",
+        "clear": true
+      }
+    },
+    {
+      "label": "启动 service-knowledge",
+      "type": "shell",
+      "command": "Write-Host 'waiting for service-auth on 8084 ...'; while ($true) { curl.exe -s -o NUL --max-time 2 http://127.0.0.1:8084/; if ($LASTEXITCODE -eq 0) { break }; Start-Sleep -Seconds 2 }; mvn -pl service-knowledge clean org.springframework.boot:spring-boot-maven-plugin:3.5.15:run",
+      "options": {
+        "cwd": "${workspaceFolder}/backend",
+        "shell": {
+          "executable": "powershell.exe",
+          "args": ["-NoLogo", "-NoProfile", "-ExecutionPolicy", "Bypass", "-Command"]
+        }
+      },
+      "problemMatcher": [],
+      "presentation": {
+        "reveal": "silent",
+        "panel": "dedicated",
+        "clear": true
+      }
+    },
+    {
+      // Vite 的 /api、/file 都代理到网关，所以等 8080 起来再启动前端。
+      "label": "启动前端",
+      "type": "shell",
+      "command": "Write-Host 'waiting for api-gateway on 8080 ...'; while ($true) { curl.exe -s -o NUL --max-time 2 http://127.0.0.1:8080/; if ($LASTEXITCODE -eq 0) { break }; Start-Sleep -Seconds 2 }; npm run dev",
+      "options": {
+        "cwd": "${workspaceFolder}/web/oanm-web",
+        "shell": {
+          "executable": "powershell.exe",
+          "args": ["-NoLogo", "-NoProfile", "-ExecutionPolicy", "Bypass", "-Command"]
+        }
+      },
+      "problemMatcher": [],
+      "presentation": {
+        "reveal": "always",
+        "panel": "dedicated",
+        "clear": true
+      }
+    },
+    {
+      // 只启动服务、不构建 common。日常请用下面的「启动全部服务」。
+      "label": "启动后端服务",
+      "dependsOn": [
+        "启动 service-auth",
+        "启动 api-gateway",
+        "启动 service-work-order",
+        "启动 service-ai",
+        "启动 service-message",
+        "启动 service-files",
+        "启动 service-software",
+        "启动 service-knowledge"
+      ],
+      "dependsOrder": "parallel"
+    },
+    {
+      // 后端 8 个服务和前端并行；前端内部会等网关就绪。
+      "label": "启动前后端",
+      "dependsOn": ["启动后端服务", "启动前端"],
+      "dependsOrder": "parallel"
+    },
+    {
+      // 从这里运行（Ctrl+Shift+B）：先安装 common，再并行启动 8 个后端服务和前端；
+      // 除 auth 外的服务会各自等 auth 就绪后再开始构建，前端等网关。
+      "label": "启动全部服务",
+      "dependsOn": ["构建 common", "启动前后端"],
+      "dependsOrder": "sequence",
+      "group": {
+        "kind": "build",
+        "isDefault": true
+      }
+    }
+  ]
+}
