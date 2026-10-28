@@ -1,4 +1,4 @@
-package com.github.gaohongf.ai.graph.wo;
+package com.github.gaohongf.ai.graph.wo.v1;
 
 import java.util.HashMap;
 import java.util.List;
@@ -7,7 +7,9 @@ import java.util.UUID;
 import java.util.regex.Pattern;
 
 import org.springframework.ai.chat.client.ChatClient;
-import org.springframework.stereotype.Component;
+import org.springframework.ai.chat.client.advisor.MessageChatMemoryAdvisor;
+import org.springframework.ai.chat.memory.ChatMemory;
+import org.springframework.ai.chat.model.ChatModel;
 
 import com.alibaba.cloud.ai.graph.CompileConfig;
 import com.alibaba.cloud.ai.graph.CompiledGraph;
@@ -27,6 +29,7 @@ import com.alibaba.cloud.ai.graph.streaming.StreamingOutput;
 import com.github.gaohongf.ai.chat.sse.ChatEvent;
 import com.github.gaohongf.ai.chat.sse.WorkflowInfo;
 import com.github.gaohongf.ai.client.FileClient;
+import com.github.gaohongf.ai.graph.wo.IWorkOrderWorkflowRunner;
 import com.github.gaohongf.ai.util.DateTimeTools;
 import com.github.gaohongf.web.sse.SseElement;
 
@@ -36,14 +39,21 @@ import reactor.core.scheduler.Schedulers;
 
 import static com.alibaba.cloud.ai.graph.StateGraph.*;
 
-@Component
-public class WorkOrderWorkflowLauncher {
+/**
+ * v1 工作流，保留作为旧流程的对照实现。
+ *
+ * <p>
+ * 刻意不再标注 {@code @Component}：v2 的启动器才是实际注入的
+ * {@link IWorkOrderWorkflowRunner}。两个都注册会让 Spring 在注入点遇到两个候选而启动失败。
+ */
+public class WorkOrderWorkflowLauncher implements IWorkOrderWorkflowRunner {
 
         public final static String GRAPH_NAME = "work-order-flow";
         public final static String DRAFT_GRAPH_NAME = "work-order-draft";
         private final CompiledGraph graph;
         private final CompiledGraph draftGraph;
         private static final Pattern INT = Pattern.compile("[+-]?\\d+");
+        private final ChatClient chatClient;
 
         private final String systemPrompt = """
                             你是一个运维工单系统的意图分析助手。
@@ -73,9 +83,14 @@ public class WorkOrderWorkflowLauncher {
                         抱歉，本次会话已经结束。请点击右上角「重新开始」开启新的会话。
                         """;
 
-        public WorkOrderWorkflowLauncher(ChatClient chatClient, RedisSaver redisSaver, DateTimeTools dateTimeTools,
+        public WorkOrderWorkflowLauncher(ChatModel chatModel, ChatMemory chatMemory, RedisSaver redisSaver,
+                        DateTimeTools dateTimeTools,
                         FileClient fileClient)
                         throws GraphStateException {
+
+                chatClient = ChatClient.builder(chatModel)
+                                .defaultAdvisors(MessageChatMemoryAdvisor.builder(chatMemory).build())
+                                .build();
                 this.graph = new StateGraph(GRAPH_NAME, getKeyStrategyFactory())
                                 // 护栏永远是最先跑的那一步：无关输入不必交给识图和提取，省 token
                                 .addNode("guardrail", new GuardrailNode(chatClient, systemPrompt))
@@ -238,6 +253,12 @@ public class WorkOrderWorkflowLauncher {
                 return toSse(draftGraph.stream(
                                 Map.of("conversationId", threadId, "userSelect", userSelect), config),
                                 threadId);
+        }
+
+        /** v1 没有自助解决节点，决策动作只在 v2 里有意义。 */
+        @Override
+        public Flux<SseElement> decide(String threadId, String action) {
+                return Flux.error(new UnsupportedOperationException("v1 工作流不支持自助解决决策"));
         }
 
         private static Flux<SseElement> toSse(Flux<NodeOutput> outputs, String threadId) {

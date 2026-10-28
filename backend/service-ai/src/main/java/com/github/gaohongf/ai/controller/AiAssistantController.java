@@ -36,16 +36,19 @@ public class AiAssistantController {
     private final ReactiveRsmWriter rsmWriter;
 
     /**
-     * 意图推断 / 工单生成。
+     * 意图推断 / 工单生成 / 自助解决决策。
      *
      * <p>
-     * 两个动作共用同一个流接口：生成本身就是这次对话的下一轮，客户端拿着同一个 {@code id}
-     * 往图的中断点里推一个选择即可。用 {@code userSelect} 有无来区分 ——
-     * 生成请求不携带 {@code userInput}。
+     * 三个动作共用同一个流接口，用参数区分：
+     * <ul>
+     *   <li>带 {@code userSelect}：用户选中了工单意图，生成草稿；</li>
+     *   <li>带 {@code action}：用户点了自助建议之后的两张决策卡片；</li>
+     *   <li>只带 {@code userInput}：继续这段对话。</li>
+     * </ul>
      *
      * <p>
-     * {@code images} 是本轮用户附带的图片访问地址（逗号分隔或重复参数）。它们只会被写进
-     * 工作流状态，模型暂时看不到图片内容 —— 这是为下一步识图预留的传输链路。
+     * {@code images} 是本轮用户附带的图片访问地址（逗号分隔或重复参数）。
+     * 识图结果只留在后端，用于追问和提取。
      *
      * <p>
      * {@code @IsOpen} 保持不变：意图推断是对话入口，生成也只是接着这段对话往下走一步；
@@ -57,7 +60,11 @@ public class AiAssistantController {
             @RequestParam(value = "id", required = false) String id,
             @RequestParam(value = "userInput", required = false) String userInput,
             @RequestParam(value = "userSelect", required = false) Integer userSelect,
+            @RequestParam(value = "action", required = false) String action,
             @RequestParam(value = "images", required = false) List<String> images) {
+        if (action != null) {
+            return aiAssistantService.workOrderDecision(id, action);
+        }
         if (userSelect != null) {
             return aiAssistantService.workOrderDraftGenerate(id, userSelect);
         }

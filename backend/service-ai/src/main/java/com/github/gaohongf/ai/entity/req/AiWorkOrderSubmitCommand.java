@@ -21,8 +21,11 @@ public class AiWorkOrderSubmitCommand {
     @Schema(description = "生成这张草稿的 AI 会话 id")
     private String conversationId;
 
-    @Schema(description = "用户选中的意图选项编号")
+    @Schema(description = "用户选中的意图选项编号；自助解决记录为空")
     private Integer userSelect;
+
+    @Schema(description = "是否自助解决记录。true 时工单服务直接记为已解决，受理人为本人")
+    private Boolean selfResolved;
 
     @Schema(description = "工单标题")
     private String title;
@@ -38,7 +41,4 @@ public class AiWorkOrderSubmitCommand {
 
     @Schema(description = "用户原始描述，一行一轮")
     private String originalProblemDescription;
-
-    @Schema(description = "解决方法")
-    private String solutionDetail;
 }

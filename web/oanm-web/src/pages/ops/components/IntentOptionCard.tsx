@@ -1,5 +1,6 @@
 import { Card, Flex, Progress, Tag, theme, Typography } from 'antd'
 
+import { decisionActionOf } from '../../../api/ai'
 import type { IntentOption } from '../../../api/ai'
 
 const { Text } = Typography
@@ -9,6 +10,11 @@ interface IntentOptionCardProps {
   selected: boolean
   /** 流还没结束（或者正在开新的一轮）时不允许选中 */
   disabled?: boolean
+  /**
+   * 不是"从几个猜测里挑一个"的卡片（故障确认的"是哪种现象"也走这里）：
+   * 不显示编号、概率和概率条。
+   */
+  plain?: boolean
   onSelect: (option: IntentOption) => void
 }
 
@@ -31,8 +37,17 @@ interface IntentOptionCardProps {
  * 只用背景色的话，"选中"和"hover"看起来会很像。这里用主色描边 + 加粗左边框，
  * 和 hover 的区别在形状上而不是明度上。
  */
-export function IntentOptionCard({ option, selected, disabled = false, onSelect }: IntentOptionCardProps) {
+export function IntentOptionCard({
+  option,
+  selected,
+  disabled = false,
+  plain = false,
+  onSelect,
+}: IntentOptionCardProps) {
   const { token } = theme.useToken()
+  // 决策卡片（「已经解决了」/「帮我提工单」）和故障确认卡片都不是从几个猜测里挑一个，
+  // 所以不显示编号、概率和概率条 —— 那些东西会让它看起来像又一个意图选项。
+  const simple = plain || decisionActionOf(option) !== null
 
   return (
     <Card
@@ -40,7 +55,7 @@ export function IntentOptionCard({ option, selected, disabled = false, onSelect 
       hoverable={!disabled}
       // 卡片逐条出现时用它做入场动画（index.css 里唯一的全局类，且尊重 prefers-reduced-motion）
       className="page-transition"
-      styles={{ body: { padding: '10px 12px' } }}
+      styles={{ body: { padding: simple ? '12px 14px' : '10px 12px' } }}
       style={{
         borderColor: selected ? token.colorPrimary : undefined,
         borderInlineStartWidth: selected ? 4 : undefined,
@@ -56,29 +71,44 @@ export function IntentOptionCard({ option, selected, disabled = false, onSelect 
     >
       <Flex vertical gap={4}>
         <Flex align="center" gap={8}>
-          {/* 编号就是提交时带走的 userSelect，摆出来免得用户对不上 */}
-          <Tag color={selected ? 'blue' : undefined} style={{ marginInlineEnd: 0 }}>
-            #{option.id}
-          </Tag>
+          {!simple && (
+            // 编号就是提交时带走的 userSelect，摆出来免得用户对不上
+            <Tag color={selected ? 'blue' : undefined} style={{ marginInlineEnd: 0 }}>
+              #{option.id}
+            </Tag>
+          )}
           <Text strong ellipsis style={{ flex: 1, minWidth: 0 }}>
             {option.title}
           </Text>
-          <Text type="secondary" style={{ fontSize: token.fontSizeSM, whiteSpace: 'nowrap' }}>
-            {option.probability}%
-          </Text>
+          {!simple && (
+            <Text type="secondary" style={{ fontSize: token.fontSizeSM, whiteSpace: 'nowrap' }}>
+              {option.probability}%
+            </Text>
+          )}
         </Flex>
-        {option.content !== '' && (
-          // 单行省略：一组卡片要能一屏扫完，完整内容在悬停的浮层里
-          <Text type="secondary" ellipsis={{ tooltip: option.content }} style={{ fontSize: token.fontSizeSM }}>
-            {option.content}
-          </Text>
+        {option.content !== '' &&
+          (simple ? (
+            <Text type="secondary" style={{ fontSize: token.fontSizeSM }}>
+              {option.content}
+            </Text>
+          ) : (
+            // 单行省略：一组卡片要能一屏扫完，完整内容在悬停的浮层里
+            <Text
+              type="secondary"
+              ellipsis={{ tooltip: option.content }}
+              style={{ fontSize: token.fontSizeSM }}
+            >
+              {option.content}
+            </Text>
+          ))}
+        {!simple && (
+          <Progress
+            percent={option.probability}
+            size="small"
+            showInfo={false}
+            style={{ marginBottom: 0 }}
+          />
         )}
-        <Progress
-          percent={option.probability}
-          size="small"
-          showInfo={false}
-          style={{ marginBottom: 0 }}
-        />
       </Flex>
     </Card>
   )

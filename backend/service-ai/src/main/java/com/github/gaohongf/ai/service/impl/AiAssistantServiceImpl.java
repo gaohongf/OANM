@@ -13,7 +13,8 @@ import com.github.gaohongf.ai.client.WorkOrderClient;
 import com.github.gaohongf.ai.client.WorkOrderCreateCommand;
 import com.github.gaohongf.ai.client.WorkOrderCreated;
 import com.github.gaohongf.ai.entity.req.AiWorkOrderSubmitCommand;
-import com.github.gaohongf.ai.graph.wo.WorkOrderWorkflowLauncher;
+import com.github.gaohongf.ai.graph.wo.IWorkOrderWorkflowRunner;
+import com.github.gaohongf.ai.graph.wo.v2.DecisionAction;
 import com.github.gaohongf.ai.service.AiAssistantService;
 import com.github.gaohongf.web.sse.SseElement;
 import com.github.gaohongf.web.util.Sse;
@@ -34,7 +35,7 @@ public class AiAssistantServiceImpl implements AiAssistantService {
     private static final int MAX_IMAGE_URL_LENGTH = 512;
 
     private final OpenAiChatProperties openAiChatProperties;
-    private final WorkOrderWorkflowLauncher workOrderWorkflowLauncher;
+    private final IWorkOrderWorkflowRunner workOrderWorkflowRunner;
     private final WorkOrderClient workOrderClient;
 
     @Override
@@ -49,7 +50,7 @@ public class AiAssistantServiceImpl implements AiAssistantService {
         } catch (RequestException ex) {
             return errorFrame(ex);
         }
-        return intentStream(workOrderWorkflowLauncher.stream(id, userInput, imageUrls));
+        return intentStream(workOrderWorkflowRunner.stream(id, userInput, imageUrls));
     }
 
     /**
@@ -96,7 +97,19 @@ public class AiAssistantServiceImpl implements AiAssistantService {
         if (userSelect == null) {
             return errorFrame(new RequestException("缺少用户选择"));
         }
-        return intentStream(workOrderWorkflowLauncher.select(id, userSelect));
+        return intentStream(workOrderWorkflowRunner.select(id, userSelect));
+    }
+
+    @Override
+    public Flux<ServerSentEvent<String>> workOrderDecision(String id, String action) {
+        if (!StringUtils.hasText(id)) {
+            return errorFrame(new RequestException("缺少会话标识，请先描述问题"));
+        }
+        DecisionAction parsed = DecisionAction.parse(action).orElse(null);
+        if (parsed == null) {
+            return errorFrame(new RequestException("未知的操作"));
+        }
+        return intentStream(workOrderWorkflowRunner.decide(id, parsed.name()));
     }
 
     /**
@@ -131,7 +144,9 @@ public class AiAssistantServiceImpl implements AiAssistantService {
         if (!StringUtils.hasText(command.getConversationId())) {
             return Mono.error(new RequestException("缺少会话标识"));
         }
-        if (command.getUserSelect() == null) {
+        boolean selfResolved = Boolean.TRUE.equals(command.getSelfResolved());
+        // 自助解决记录没有"选中的意图"，普通工单必须有
+        if (!selfResolved && command.getUserSelect() == null) {
             return Mono.error(new RequestException("缺少用户选择"));
         }
         if (!StringUtils.hasText(command.getTitle())) {
@@ -147,10 +162,10 @@ public class AiAssistantServiceImpl implements AiAssistantService {
         create.setPriority(command.getPriority());
         create.setProblemDescription(command.getProblemDescription().trim());
         create.setOriginalProblemDescription(command.getOriginalProblemDescription());
-        create.setSolutionDetail(command.getSolutionDetail());
+        create.setSelfResolved(selfResolved);
         // 归档信息由服务端从这次对话取，不信浏览器自报的两个值
         create.setAiConversationId(command.getConversationId());
-        create.setAiSelectedOptionId(command.getUserSelect());
+        create.setAiSelectedOptionId(selfResolved ? null : command.getUserSelect());
 
         return workOrderClient.create(token, create);
     }

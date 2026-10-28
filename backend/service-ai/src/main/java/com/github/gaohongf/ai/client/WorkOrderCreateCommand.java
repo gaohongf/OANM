@@ -17,7 +17,8 @@ public class WorkOrderCreateCommand {
     private String priority;
     private String problemDescription;
     private String originalProblemDescription;
-    private String solutionDetail;
     private String aiConversationId;
     private Integer aiSelectedOptionId;
+    /** true 时工单服务把记录直接置为已解决、受理人为建单人 */
+    private Boolean selfResolved;
 }

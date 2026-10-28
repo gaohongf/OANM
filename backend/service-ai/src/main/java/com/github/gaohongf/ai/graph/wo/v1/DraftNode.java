@@ -1,4 +1,4 @@
-package com.github.gaohongf.ai.graph.wo;
+package com.github.gaohongf.ai.graph.wo.v1;
 
 import java.util.HashMap;
 import java.util.Map;

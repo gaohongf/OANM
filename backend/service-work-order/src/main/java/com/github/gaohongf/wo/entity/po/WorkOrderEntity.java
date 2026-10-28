@@ -29,7 +29,6 @@ import lombok.NoArgsConstructor;
  *   {"type": "demand|fault"}        type
  *   {"priority": "low|..."}         priority
  *   {"content": "..."}              problemDescription
- *   {"solution_detail": "..."}      solutionDetail
  *   {"user_choose": 2}              aiSelectedOptionId
  *   {"user_input_0": "..."}         originalProblemDescription（多行, 一行一轮）
  * </pre>
@@ -86,9 +85,12 @@ public class WorkOrderEntity extends BaseEntity {
     private String originalProblemDescription;
 
     /**
-     * AI 给出的解决方法
+     * 是否为自助解决记录。
+     * <p>
+     * 用户依据 AI 给出的知识库建议自行处理完毕后创建。建单时状态直接是
+     * {@link WorkOrderStatus#RESOLVED}，受理人是建单人本人；其余字段与普通工单一致。
      */
-    private String solutionDetail;
+    private Boolean selfResolved;
 
     /**
      * AI 会话 ID, 归档指针。
@@ -129,7 +131,8 @@ public class WorkOrderEntity extends BaseEntity {
     /**
      * 此单状态。
      * <p>
-     * 建单时由服务端固定为 {@link WorkOrderStatus#NEW}，不接受调用方指定。
+     * 普通工单建单时由服务端固定为 {@link WorkOrderStatus#NEW}；
+     * 自助解决记录由服务端固定为 {@link WorkOrderStatus#RESOLVED}。两种情况都不接受调用方指定。
      */
     @TableField(typeHandler = EnumTypeHandler.class)
     private WorkOrderStatus status;

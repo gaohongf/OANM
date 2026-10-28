@@ -1,5 +1,6 @@
 package com.github.gaohongf.ai.client;
 
+import org.springframework.beans.factory.annotation.Qualifier;
 import org.springframework.core.ParameterizedTypeReference;
 import org.springframework.core.codec.DecodingException;
 import org.springframework.http.MediaType;
@@ -35,7 +36,7 @@ public class WorkOrderClient {
      * 注入的是 {@link WorkOrderClientConfiguration} 里那个专用的 WebClient ——
      * 负载均衡只作用于它，不要把负载均衡 Builder 注册成全局 bean（原因见那个配置类）。
      */
-    public WorkOrderClient(WebClient workOrderWebClient) {
+    public WorkOrderClient(@Qualifier("workOrderWebClient") WebClient workOrderWebClient) {
         this.webClient = workOrderWebClient;
     }
 

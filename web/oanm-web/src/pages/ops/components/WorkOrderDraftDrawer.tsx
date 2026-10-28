@@ -26,13 +26,14 @@ export interface WorkOrderFormValues {
   type: WorkOrderType
   priority: WorkOrderPriority
   problemDescription: string
-  solutionDetail?: string
 }
 
 export interface WorkOrderDraftDrawerProps {
   open: boolean
   /** 模型生成、并被用户改过的工单；打开时用它预填 */
   draft: WorkOrderDraft | null
+  /** true = 自助解决记录，标题与按钮文案随之变化 */
+  selfResolved: boolean
   /** 用户原话，一行一轮；只读展示，不参与表单提交 */
   originalDescription: string
   submitting: boolean
@@ -56,6 +57,7 @@ export interface WorkOrderDraftDrawerProps {
 export function WorkOrderDraftDrawer({
   open,
   draft,
+  selfResolved,
   originalDescription,
   submitting,
   onClose,
@@ -83,12 +85,11 @@ export function WorkOrderDraftDrawer({
     type: normalizeType(draft?.type) ?? undefined,
     priority: normalizePriority(draft?.priority) ?? undefined,
     problemDescription: draft?.problemDescription ?? '',
-    solutionDetail: draft?.solutionDetail ?? '',
   }
 
   return (
     <Drawer
-      title="确认工单"
+      title={selfResolved ? '确认自助解决记录' : '确认工单'}
       open={open}
       onClose={handleClose}
       width="min(720px, 100%)"
@@ -105,7 +106,7 @@ export function WorkOrderDraftDrawer({
             fallback={<Text type="secondary">没有建单权限，请联系管理员</Text>}
           >
             <Button type="primary" loading={submitting} onClick={handleSubmit}>
-              提交工单
+              {selfResolved ? '提交记录' : '提交工单'}
             </Button>
           </Auth>
         </Flex>
@@ -122,7 +123,6 @@ export function WorkOrderDraftDrawer({
             type: values.type ?? '',
             priority: values.priority ?? '',
             problemDescription: values.problemDescription ?? '',
-            solutionDetail: values.solutionDetail ?? '',
           })
         }}
       >
@@ -161,10 +161,6 @@ export function WorkOrderDraftDrawer({
             <TextArea value={originalDescription} readOnly rows={4} />
           </Form.Item>
         )}
-
-        <Form.Item name="solutionDetail" label="解决方法">
-          <TextArea rows={8} placeholder="建议的处理步骤，提交前可以再改" />
-        </Form.Item>
       </Form>
     </Drawer>
   )

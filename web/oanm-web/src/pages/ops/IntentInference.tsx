@@ -1,4 +1,4 @@
-import { Fragment, useCallback, useEffect, useRef, useState } from 'react'
+import { Fragment, useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import type { ChangeEvent } from 'react'
 import {
   App as AntdApp,
@@ -24,14 +24,28 @@ import {
 } from '@ant-design/icons'
 import { useNavigate } from 'react-router'
 
-import { generateWorkOrderDraft, startIntentInference, submitWorkOrderDraft } from '../../api/ai'
-import type { IntentNode, WorkOrderDraft } from '../../api/ai'
+import {
+  continueDecision,
+  decisionActionOf,
+  generateWorkOrderDraft,
+  startIntentInference,
+  submitWorkOrderDraft,
+} from '../../api/ai'
+import type {
+  DecisionAction,
+  IntentNode,
+  IntentOption,
+  KnowledgeSource,
+  WorkOrderDraft,
+} from '../../api/ai'
 import { clearDraft, draftInputRounds, emptyDraft, loadDraft, saveDraft } from '../../api/aiSession'
 import type { IntentDraft, IntentRound } from '../../api/aiSession'
 import { IMAGE_MAX_BYTES, uploadFile } from '../../api/files'
 import type { UploadedFile } from '../../api/files'
+import { useAuthStore } from '../../store/auth'
+import type { MenuNode } from '../../types/api'
 import { ChatBubble } from './components/ChatBubble'
-import type { BubbleContent } from './components/ChatBubble'
+import type { BubbleContent, SolutionSteps } from './components/ChatBubble'
 import { WorkOrderDraftDrawer } from './components/WorkOrderDraftDrawer'
 import type { WorkOrderFormValues } from './components/WorkOrderDraftDrawer'
 
@@ -47,6 +61,87 @@ const GUIDE_TIPS = [
   { label: '地点', hint: '您在哪里、哪间办公室或者哪个厂房，比如「行政楼三楼」「财务办公室」' },
   { label: '现象', hint: '你看到了什么、做到哪一步出的错，比如「导出报表一直转圈」' },
 ]
+
+/**
+ * 卡片下方的操作提示。
+ *
+ * 不给提示时，用户不知道这些卡片是可以点的、更不知道点完会发生什么 ——
+ * 这两句就是为此存在的，措辞尽量口语化。
+ */
+const OPTION_HINT = '请点击最接近的一项；如果都不像，直接在下面继续补充说明。'
+const DECISION_HINT = '请点击上面的选项，也可以直接在下面回复「已经解决了」/「帮我提工单」。'
+const PROBE_HINT = '点最接近的一项；都不是就在下面说说实际看到的现象。'
+
+/** 自助步骤折叠后保留几步：手机上一屏够读完 */
+const COLLAPSED_STEPS = 2
+
+/** 知识库浏览页的路径。出处链接跳到它的 `?openId=` 入口 */
+const KNOWLEDGE_PATH = '/knowledge'
+
+/** 侧栏里有没有这个页面 —— 没有就不给链接，免得点过去是"页面不存在" */
+function hasPagePath(nodes: MenuNode[], path: string): boolean {
+  return nodes.some((node) => node.path === path || hasPagePath(node.children, path))
+}
+
+/**
+ * 把 AI 的一次作答拆成多条气泡。
+ *
+ * 提示词里追问和自助步骤都是"一句一行"写出来的：拆开后一句一个气泡，
+ * 长回复不会挤成一大块，读起来也更像对面在连续说话。
+ * 选项气泡上方那段说明（自助步骤）同样拆开，卡片本身仍是独立的一条。
+ */
+function splitBubbles(content: BubbleContent): BubbleContent[] {
+  if (content.kind === 'text') {
+    const lines = splitLines(content.text)
+    return lines.length > 0 ? lines.map((text): BubbleContent => ({ kind: 'text', text })) : [content]
+  }
+  if (content.kind === 'options' && content.steps !== undefined) {
+    // 步骤排成一条编号列表，卡片另起一条 —— 不再一句一个气泡，手机上不会刷屏
+    return [{ kind: 'steps', ...content.steps }, { ...content, steps: undefined }]
+  }
+  if (content.kind === 'options' && content.text !== undefined) {
+    return [
+      ...splitLines(content.text).map((text): BubbleContent => ({ kind: 'text', text })),
+      { ...content, text: undefined },
+    ]
+  }
+  return [content]
+}
+
+/** 按换行切开，去掉空行和每行首尾空白；流式输出里半行还没写完也照常返回。 */
+function splitLines(text: string): string[] {
+  return text
+    .split('\n')
+    .map((line) => line.trim())
+    .filter((line) => line !== '')
+}
+
+/**
+ * 把自助解决建议排成「提醒 / 步骤 / 出处」。
+ *
+ * 约定来自后端提示词：一句一行，风险提醒以「注意：」开头且不算步骤，
+ * 出处是「参考…」那一行，其余每行都是一步。
+ * 模型偶尔仍会给步骤带序号，这里先去掉，免得界面上出现"1 1."。
+ */
+function parseSolution(text: string): Omit<SolutionSteps, 'collapsedCount'> {
+  let note: string | undefined
+  let footnote: string | undefined
+  const steps: string[] = []
+
+  splitLines(text).forEach((line) => {
+    if (line.startsWith('参考')) {
+      footnote = footnote === undefined ? line : `${footnote} ${line}`
+      return
+    }
+    if (note === undefined && (line.startsWith('注意') || line.startsWith('提示'))) {
+      note = line
+      return
+    }
+    steps.push(line.replace(/^\d+\s*[.、)）]\s*/, ''))
+  })
+
+  return { note, steps, footnote }
+}
 
 /** 每条消息最多几张图。后端有同样的校验，这里先挡是为了给出即时反馈。 */
 const MAX_IMAGES = 3
@@ -104,6 +199,9 @@ export default function IntentInference() {
   const { message } = AntdApp.useApp()
   const { token } = theme.useToken()
   const navigate = useNavigate()
+  // 没有知识库菜单（或没有读权限）时，出处的标题照样显示，但点不进去
+  const menus = useAuthStore((state) => state.menus)
+  const canOpenKnowledge = useMemo(() => hasPagePath(menus, KNOWLEDGE_PATH), [menus])
 
   // sessionStorage 是同步的，所以直接当 useState 的初始值 ——
   // 不需要"挂载后再 setState"的 effect（那个模式还会多渲染一帧空页面）
@@ -146,6 +244,14 @@ export default function IntentInference() {
    * 用 some 而不是只看最后一轮：刷新后重新点开这段草稿时判断结果应当一致。
    */
   const sessionEnded = draft.rounds.some((round) => round.ended)
+  /**
+   * 自助解决的记录已经生成：后端这段对话已经走到终点，再发消息接不上去了。
+   * 用户还能打开卡片确认/修改并提交，或者点「重新开始」开一段新会话。
+   */
+  const selfServiceDone =
+    draft.workOrder !== null &&
+    draft.workOrder.selfResolved &&
+    draft.workOrder.status !== 'failed'
 
   // 每次变化都落盘：中途刷新页面时，前面几轮和会话 id 都还在
   useEffect(() => {
@@ -206,7 +312,7 @@ export default function IntentInference() {
   }, [])
 
   const run = useCallback(
-    async (text: string, attachments: UploadedFile[]) => {
+    async (text: string, attachments: UploadedFile[], action?: DecisionAction) => {
       const controller = new AbortController()
       abortRef.current = controller
       const conversationId = draft.conversationId
@@ -227,7 +333,11 @@ export default function IntentInference() {
             input: text,
             mode: 'PENDING',
             model: '',
+            greeting: '',
             question: '',
+            lead: '',
+            solution: '',
+            sources: [],
             refusal: '',
             ended: false,
             options: [],
@@ -238,44 +348,113 @@ export default function IntentInference() {
 
       let received = 0
       /**
-       * 本轮由哪个节点作答。**在闭包外面**记一份，因为下面 finally 里要拿它判断
+       * 本轮最后一个作答节点。**在闭包外面**记一份，因为下面 finally 里要拿它判断
        * "没解析出选项"到底是不是个错误 —— 那时 draft 已经不容易读了。
+       * 自助解决一轮会先后经过 solution / decision，以最后一次为准。
        */
       let mode: IntentNode | null = null
+      /** 本轮模型名：自助解决记录的气泡标签要用 */
+      let modelName = ''
+
+      /**
+       * 自助解决记录不是某一轮的答复，而是一张可以直接提交的卡片 ——
+       * 放在所有轮次之后，和普通工单草稿同一个位置。
+       */
+      const onSelfResolvedDraft = (workOrderDraft: WorkOrderDraft) => {
+        forceScrollRef.current = true
+        setDraft((prev) => ({
+          ...prev,
+          workOrder: {
+            status: 'ready',
+            draft: workOrderDraft,
+            roundIndex: Math.max(prev.rounds.length - 1, 0),
+            optionId: null,
+            selfResolved: true,
+            model: modelName,
+            workOrderId: null,
+            error: null,
+          },
+        }))
+      }
+
+      /**
+       * 两条流共用的回调。
+       *
+       * 文字也要接在这边：动作之后的回答形态由后端决定，`WORK_ORDER` 卡片会先追问
+       * 缺少的时间地点，只接选项的话这句话就没地方落，界面会显示成"没有给出内容"。
+       */
+      const commonHandlers = {
+        // 模型名贴在气泡名字旁边；以后人工介入时这里记的是坐席
+        onModel: (name: string) => {
+          modelName = name
+          patchActiveRound((round) => ({ ...round, model: name }))
+        },
+        onMode: (node: IntentNode) => {
+          mode = node
+          patchActiveRound((round) => ({ ...round, mode: node }))
+        },
+        // 第一轮的开场白：和作答分开存，渲染时排在作答前面
+        onGreeting: (greeting: string) =>
+          patchActiveRound((round) => ({ ...round, greeting })),
+        // 收到的每次都是完整一段（不是增量），直接覆盖
+        onQuestion: (question: string) =>
+          patchActiveRound((round) => ({ ...round, question })),
+        onLead: (lead: string) => patchActiveRound((round) => ({ ...round, lead })),
+        // 出处一条一帧地到，每次都覆盖成当前的全集
+        onSources: (sources: KnowledgeSource[]) =>
+          patchActiveRound((round) => ({ ...round, sources })),
+        onSolution: (solution: string) =>
+          patchActiveRound((round) => ({ ...round, solution })),
+        // 护栏拦下这一轮：AI 的话就是拒绝说明；ended 表示会话已被后端结束
+        onGuardrail: (refusal: string, ended: boolean) =>
+          patchActiveRound((round) => ({ ...round, refusal, ended })),
+        onOption: (option: IntentOption) => {
+          received += 1
+          patchActiveRound((round) => ({ ...round, options: [...round.options, option] }))
+        },
+        onSelfResolvedDraft,
+        onError: (msg: string) => setError(msg),
+      }
+
       try {
-        await startIntentInference({
-          conversationId,
-          userInput: text,
-          // 后端据此读取图片字节交给模型识图
-          images: attachments.map((attachment) => attachment.url),
-          signal: controller.signal,
-          // 首轮的 threadId 是后端生成的，就在这个事件里 ——
-          // 它同时是下一轮、以及生成/提交工单要带的会话标识
-          onWorkflow: (threadId) => setDraft((prev) => ({ ...prev, conversationId: threadId })),
-          // 模型名贴在气泡名字旁边；以后人工介入时这里记的是坐席
-          onModel: (modelName) => patchActiveRound((round) => ({ ...round, model: modelName })),
-          onMode: (node) => {
-            mode = node
-            patchActiveRound((round) => ({ ...round, mode: node }))
-          },
-          // 收到的每次都是完整一段（不是增量），直接覆盖
-          onQuestion: (question) => patchActiveRound((round) => ({ ...round, question })),
-          // 护栏拦下这一轮：AI 的话就是拒绝说明；ended 表示会话已被后端结束
-          onGuardrail: (refusal, ended) =>
-            patchActiveRound((round) => ({ ...round, refusal, ended })),
-          onOption: (option) => {
-            received += 1
-            patchActiveRound((round) => ({ ...round, options: [...round.options, option] }))
-          },
-          onError: (msg) => setError(msg),
-        })
+        if (action !== undefined) {
+          if (conversationId === null) {
+            return
+          }
+          // 点决策卡片：带动作而不是文字，后端直接走对应分支，不再问模型
+          await continueDecision({
+            conversationId,
+            action,
+            signal: controller.signal,
+            ...commonHandlers,
+          })
+        } else {
+          await startIntentInference({
+            conversationId,
+            userInput: text,
+            // 后端据此读取图片字节交给模型识图
+            images: attachments.map((attachment) => attachment.url),
+            signal: controller.signal,
+            // 首轮的 threadId 是后端生成的，就在这个事件里 ——
+            // 它同时是下一轮、以及生成/提交工单要带的会话标识
+            onWorkflow: (threadId) => setDraft((prev) => ({ ...prev, conversationId: threadId })),
+            ...commonHandlers,
+          })
+        }
       } finally {
         setStreaming(false)
         abortRef.current = null
         // 中途自己中断的不算"没解析出选项"，别把它报成解析失败；
-        // 追问和护栏拒绝这两轮本来就没有也不该有选项，一条都没解析出来是**正确**结果
+        // 追问、解决步骤、护栏拒绝和自助记录这几轮本来就没有也不该有选项，
+        // 一条都没解析出来是正确结果
         setNoOption(
-          !controller.signal.aborted && received === 0 && mode !== 'ask' && mode !== 'refused',
+          !controller.signal.aborted &&
+            received === 0 &&
+            mode !== 'ask' &&
+            mode !== 'refused' &&
+            mode !== 'solution' &&
+            mode !== 'probe' &&
+            mode !== 'self_resolved',
         )
       }
     },
@@ -309,6 +488,7 @@ export default function IntentInference() {
         draft: null,
         roundIndex,
         optionId: option.id,
+        selfResolved: false,
         model: '',
         workOrderId: null,
         error: null,
@@ -385,7 +565,23 @@ export default function IntentInference() {
     !busy &&
     !submitted &&
     !sessionEnded &&
+    !selfServiceDone &&
     !attachmentBlocking
+
+  /**
+   * 点自助决策卡片。
+   *
+   * 和普通意图选项不同：它不是"挑一个最像的"，而是一个明确的动作，
+   * 所以不写 `selected`（那会冒出"生成工单"按钮），直接把动作发给后端。
+   * 这轮的"用户发言"用卡片标题表示，对话记录才不会缺一环。
+   */
+  const runDecision = (option: IntentOption) => {
+    const action = decisionActionOf(option)
+    if (action === null || draft.conversationId === null || busy || submitted || sessionEnded) {
+      return
+    }
+    void run(option.title, [], action)
+  }
 
   const removePending = (uid: string) => {
     // 只从待发送列表里去掉，不调删除接口：普通用户没有删除权限，
@@ -500,6 +696,8 @@ export default function IntentInference() {
   const activeRound = activeIndex >= 0 ? draft.rounds[activeIndex] : null
   /** 当前这一轮 AI 在**追问**，而不是给选项。输入框的语义与文案都要跟着走 */
   const asking = activeRound?.mode === 'ask'
+  /** 当前这一轮在等用户回答"自助有没有用"：卡片能点，也可以直接说 */
+  const deciding = activeRound?.mode === 'decision'
   const selectedHere =
     draft.selected !== null && draft.selected.roundIndex === activeIndex
       ? draft.selected.option
@@ -519,18 +717,22 @@ export default function IntentInference() {
     if (generation === null || draft.conversationId === null) {
       return
     }
+    // 普通工单必须说得清是按哪条意图生成的；自助解决记录没有选项
+    if (!generation.selfResolved && generation.optionId === null) {
+      return
+    }
     setSubmitting(true)
     try {
       const created = await submitWorkOrderDraft({
         conversationId: draft.conversationId,
         // 用生成时记下的选项编号，而不是"当前选中"：用户可能在生成后又点了别的卡片
-        userSelect: generation.optionId,
+        userSelect: generation.optionId ?? undefined,
+        selfResolved: generation.selfResolved || undefined,
         title: values.title,
         type: values.type,
         priority: values.priority,
         problemDescription: values.problemDescription,
         originalProblemDescription: draftInputRounds(draft).join('\n'),
-        solutionDetail: values.solutionDetail,
       })
       setDraft((prev) => {
         if (prev.workOrder === null) {
@@ -545,7 +747,6 @@ export default function IntentInference() {
                 type: values.type,
                 priority: values.priority,
                 problemDescription: values.problemDescription,
-                solutionDetail: values.solutionDetail ?? '',
               }
         return {
           ...prev,
@@ -559,7 +760,7 @@ export default function IntentInference() {
         }
       })
       setDrawerOpen(false)
-      message.success('工单已提交')
+      message.success(generation.selfResolved ? '自助解决记录已提交' : '工单已提交')
     } catch (err) {
       // 抽屉不关：用户能在同一张表上改了再交
       message.error(err instanceof Error ? err.message : '提交失败')
@@ -574,6 +775,35 @@ export default function IntentInference() {
       navigate(`/ops/work-order?openId=${encodeURIComponent(id)}`)
     }
   }
+
+  /**
+   * 自助步骤的气泡数据。
+   *
+   * 流还在跑时先全部展开，结束后再折叠：否则每多流出一句就会把上一句顶掉，
+   * 看起来像列表在跳。
+   */
+  /**
+   * 出处链接。
+   *
+   * 两种情况不给链接：模型给的标题对不上原文（没有 id），或者当前用户没有知识库菜单——
+   * 后者的路由压根没建，点过去只会看到"页面不存在"。
+   */
+  const openKnowledgeArticle = (articleId: string | null): (() => void) | undefined => {
+    if (articleId === null || !canOpenKnowledge) {
+      return undefined
+    }
+    return () => navigate(`${KNOWLEDGE_PATH}?openId=${encodeURIComponent(articleId)}`)
+  }
+
+  const solutionSteps = (round: IntentRound, active: boolean): SolutionSteps => ({
+    ...parseSolution(round.solution),
+    lead: round.lead !== '' ? round.lead : undefined,
+    sources: round.sources.map((source) => ({
+      ...source,
+      onOpen: openKnowledgeArticle(source.articleId),
+    })),
+    collapsedCount: streaming && active ? undefined : COLLAPSED_STEPS,
+  })
 
   /**
    * 一轮 AI 作答该渲染成哪种气泡。
@@ -607,31 +837,108 @@ export default function IntentInference() {
         : null
     }
 
+    if (round.mode === 'solution') {
+      // 引导语比步骤先到：先显示这句话，别让用户对着空白等
+      if (round.solution !== '' || round.lead !== '') {
+        return { kind: 'steps', ...solutionSteps(round, isActive) }
+      }
+      return streaming && isActive
+        ? { kind: 'pending', text: '正在查知识库…' }
+        : null
+    }
+
+    if (round.mode === 'probe') {
+      if (round.options.length === 0) {
+        // 提问已经到了、卡片还在路上
+        return round.question !== ''
+          ? {
+              kind: 'options',
+              text: round.question,
+              options: [],
+              selectedId: null,
+              disabled: true,
+              hint: '正在准备确认选项…',
+              onSelect: () => undefined,
+            }
+          : streaming && isActive
+            ? { kind: 'pending', text: '正在查知识库…' }
+            : null
+      }
+      return {
+        kind: 'options',
+        text: round.question !== '' ? round.question : undefined,
+        plainCards: true,
+        options: round.options,
+        // 这些卡是"你遇到的是哪种现象"，不是"挑一个最像的"，没有选中态
+        selectedId: null,
+        disabled: !isActive || streaming || generating || submitted,
+        hint: submitted ? '工单已创建，这段会话已结束' : PROBE_HINT,
+        onSelect: (option) => {
+          // 卡片文字本身就是一句回答（"是，就是纸卡住了"），当成用户发言发回去就行
+          run(option.title, [])
+        },
+      }
+    }
+
+    if (round.mode === 'self_resolved') {
+      // 记录本身渲染成所有轮次之后的那张工单卡片，这里只在等待时占位
+      if (draft.workOrder !== null && draft.workOrder.status !== 'failed') {
+        return null
+      }
+      return streaming && isActive
+        ? { kind: 'pending', text: '正在整理自助解决记录…' }
+        : null
+    }
+
+    const decision = round.mode === 'decision'
     if (round.options.length === 0) {
+      // 自助步骤已经到了一部分、决策卡片还在路上：先把步骤显示出来，
+      // 不要退回成"正在分析…"，那会让已经读过的内容闪一下消失
+      if (decision && round.solution !== '') {
+        return {
+          kind: 'options',
+          steps: solutionSteps(round, isActive),
+          options: [],
+          selectedId: null,
+          disabled: true,
+          hint: '正在准备下一步选项…',
+          onSelect: () => undefined,
+        }
+      }
       return streaming && isActive ? { kind: 'pending', text: '正在分析…' } : null
     }
 
+    const stateHint = submitted
+      ? '工单已创建，这段会话已结束'
+      : !isActive
+        ? '这是之前某一轮的选项，仅供回看'
+        : streaming
+          ? `AI 正在继续给出选项，已收到 ${round.options.length} 条…`
+          : generating
+            ? '正在按选中的选项生成工单…'
+            : undefined
+
     return {
       kind: 'options',
+      // 自助解决步骤排在决策卡片上方：点「已经解决了」之前还能回看做法
+      steps: decision && round.solution !== '' ? solutionSteps(round, isActive) : undefined,
       options: round.options,
       selectedId:
-        draft.selected !== null && draft.selected.roundIndex === index
+        draft.selected !== null && draft.selected.roundIndex === index && !decision
           ? draft.selected.option.id
           : null,
       // 流没结束时后面可能还有新选项，现在选中的编号随时会被打乱；
       // 工单已创建后整段会话只读
       disabled: !isActive || streaming || generating || submitted,
-      hint: submitted
-        ? '工单已创建，这段会话已结束'
-        : !isActive
-          ? '这是之前某一轮的选项，仅供回看'
-          : streaming
-            ? `AI 正在继续给出选项，已收到 ${round.options.length} 条…`
-            : generating
-              ? '正在按选中的选项生成工单…'
-              : undefined,
-      onSelect: (option) =>
-        setDraft((prev) => ({ ...prev, selected: { roundIndex: index, option } })),
+      hint: stateHint ?? (decision ? DECISION_HINT : OPTION_HINT),
+      onSelect: (option) => {
+        // 决策卡片是「走哪条路」，点了就直接发动作；普通选项只是先记下来
+        if (decisionActionOf(option) !== null) {
+          runDecision(option)
+          return
+        }
+        setDraft((prev) => ({ ...prev, selected: { roundIndex: index, option } }))
+      },
     }
   }
 
@@ -696,7 +1003,8 @@ export default function IntentInference() {
                 </Text>
                 <Paragraph style={{ margin: '6px 0 0' }}>
                   把遇到的问题告诉我就行：我来判断它属于哪一类工单 —— 信息够了，我会列出几种可能让你挑；
-                  还缺关键信息，我会先反问你一句。你确认之后，我再帮你把工单填好，你可以点开工单修改并提交。
+                  还缺关键信息，我会先反问你一句。如果知识库里有现成的办法，我会先给出自助解决的步骤；
+                  按步骤解决不了，再帮你把工单填好，你可以点开工单修改并提交。
                 </Paragraph>
               </div>
             </Flex>
@@ -738,16 +1046,33 @@ export default function IntentInference() {
           </div>
         )}
 
-        {draft.rounds.map((round, index) => {
-          const content = aiBubble(round, index)
+        {draft.rounds.map((round, index) => { // oxlint-disable-line react/refs -- 卡片点击是之后才执行的事件，不会在这次渲染里读 ref
+          const bubble = aiBubble(round, index)
+          // 开场白排在本轮作答前面：它就是"接住第一句话"的那一段，
+          // 后面的追问/选项/步骤照旧渲染成各自的气泡
+          const greeting =
+            round.greeting === '' ? [] : splitBubbles({ kind: 'text', text: round.greeting })
+          const contents = [...greeting, ...(bubble === null ? [] : splitBubbles(bubble))]
           return (
             <Fragment key={index}>
               <ChatBubble
                 role="user"
                 content={{ kind: 'text', text: round.input, attachments: round.attachments }}
               />
-              {content !== null && (
-                <ChatBubble role="ai" content={content} tag={round.model} />
+              {contents.length > 0 && (
+                // 同一次作答拆出来的几句贴紧些（6 而不是 16），才看得出是连着说的
+                <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
+                  {contents.map((content, lineIndex) => (
+                    <ChatBubble
+                      key={lineIndex}
+                      role="ai"
+                      content={content}
+                      // 名字和模型标签只挂在第一条上，后面几条只对齐不重复
+                      tag={lineIndex === 0 ? round.model : undefined}
+                      continuation={lineIndex > 0}
+                    />
+                  ))}
+                </div>
               )}
             </Fragment>
           )
@@ -762,6 +1087,7 @@ export default function IntentInference() {
               kind: 'workorder',
               status: draft.workOrder.status,
               draft: draft.workOrder.draft,
+              selfResolved: draft.workOrder.selfResolved,
               workOrderId: draft.workOrder.workOrderId,
               error: draft.workOrder.error,
               onOpen: () => setDrawerOpen(true),
@@ -790,8 +1116,9 @@ export default function IntentInference() {
         )}
       </div>
 
-      {/* 工单创建后不再提供生成入口：同一段会话只出一张单 */}
-      {selectedHere !== null && !submitted && (
+      {/* 工单创建后不再提供生成入口：同一段会话只出一张单。
+          自助决策卡片不会被记成 selected，所以这里只会出现普通意图选项。 */}
+      {selectedHere !== null && decisionActionOf(selectedHere) === null && !submitted && (
         <Button
           block
           size="large"
@@ -805,7 +1132,7 @@ export default function IntentInference() {
             ? '正在生成…'
             : draft.workOrder !== null && draft.workOrder.optionId === selectedHere.id
               ? // 这张单已经按当前选项生成过，再点就是换一版，而不是第一次生成
-                '不满意？再生成一次'
+                '没填对？让 AI 重新总结一下'
               : `生成工单（#${selectedHere.id} ${selectedHere.title}）`}
         </Button>
       )}
@@ -892,18 +1219,22 @@ export default function IntentInference() {
             placeholder={
               sessionEnded
                 ? '本次会话已结束，请点右上角「重新开始」'
-                : submitted
-                  ? '工单已创建，如需再次提单请点右上角「重新开始」'
-                  : isFirst
+                : selfServiceDone
+                  ? '自助解决记录已生成，可在上面的卡片里查看并提交'
+                  : submitted
+                    ? '工单已创建，如需再次提单请点右上角「重新开始」'
+                    : isFirst
                     ? '例如：财务系统导出报表时一直转圈'
-                    : asking
-                      ? '回答它上面的问题，比如：昨天上午，行政楼'
-                      : '补充一些细节，比如：昨天升级之后才开始的'
+                    : deciding
+                      ? '也可以直接回复：已经解决了 / 帮我提工单'
+                      : asking
+                        ? '回答它上面的问题，比如：昨天上午，行政楼'
+                        : '补充一些细节，比如：昨天升级之后才开始的'
             }
             // 单行起步，写长了自动长高（最多 6 行）
             autoSize={{ minRows: 1, maxRows: 6 }}
             maxLength={2000}
-            disabled={busy || submitted || sessionEnded}
+            disabled={busy || submitted || sessionEnded || selfServiceDone}
             // 回车即发送，换行用 Shift+Enter —— 聊天框的默认手势。
             // 输入法正在组词时的回车是"选词"，不能当发送（否则中文用户每打一个词就发一次）
             onPressEnter={(event) => {
@@ -942,7 +1273,9 @@ export default function IntentInference() {
             <Button
               size="large"
               icon={<PictureOutlined />}
-              disabled={busy || submitted || sessionEnded || pending.length >= MAX_IMAGES}
+              disabled={
+                busy || submitted || sessionEnded || selfServiceDone || pending.length >= MAX_IMAGES
+              }
               onClick={() => fileInputRef.current?.click()}
               aria-label="添加图片"
             />
@@ -973,6 +1306,7 @@ export default function IntentInference() {
       <WorkOrderDraftDrawer
         open={drawerOpen}
         draft={draft.workOrder?.draft ?? null}
+        selfResolved={draft.workOrder?.selfResolved ?? false}
         originalDescription={draftInputRounds(draft).join('\n')}
         submitting={submitting}
         onClose={() => setDrawerOpen(false)}

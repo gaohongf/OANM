@@ -1,5 +1,7 @@
 package com.github.gaohongf.ai.util;
 
+import org.springframework.ai.converter.StructuredOutputConverter;
+
 import reactor.core.Disposable;
 import reactor.core.publisher.Flux;
 
@@ -34,5 +36,10 @@ public class JsonLinesAIOutputHandler<T> implements AIOutputHandler<T> {
             });
             sink.onDispose(disposable);
         }).map(converter::convert);
+    }
+
+    @Override
+    public StructuredOutputConverter<T> getConverter() {
+        return converter;
     }
 }

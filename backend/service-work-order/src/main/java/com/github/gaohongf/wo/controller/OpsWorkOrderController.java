@@ -38,8 +38,7 @@ import lombok.AllArgsConstructor;
  *
  * <h2>列表与详情是两个接口</h2>
  * 列表只给摘要（见 {@link WorkOrderRes}），正文由详情单独取。这不是"多此一举"：
- * {@code solution_detail} 是模型生成的正文，可能上千字，列表带出来就是成倍的
- * 无用载荷，而它只在抽屉打开时才需要。
+ * 工单描述可能上千字，列表带出来就是成倍的无用载荷，而它只在抽屉打开时才需要。
  *
  * <h2>流转与统计的权限键</h2>
  * <ul>
@@ -112,7 +111,9 @@ public class OpsWorkOrderController {
     /**
      * 建单。
      * <p>
-     * 入参里没有状态，新单固定是 {@code NEW}；也没有受理人，那是受理环节的事。
+     * 入参里没有状态：普通工单固定是 {@code NEW}，{@code selfResolved=true} 的自助解决记录
+     * 直接是 {@code RESOLVED}。普通单也没有受理人，那是受理环节的事；自助记录由服务端把
+     * 受理人置为建单人。
      * AI 对话的归档信息（{@code aiConversationId} / {@code aiSelectedOptionId}）由前端提交时带上，
      * 手工建单则为空。
      */

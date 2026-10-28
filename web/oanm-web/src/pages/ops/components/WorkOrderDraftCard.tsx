@@ -15,6 +15,8 @@ const { Text } = Typography
 export interface WorkOrderDraftCardProps {
   status: 'generating' | 'ready' | 'failed' | 'submitted'
   draft: WorkOrderDraft | null
+  /** true = 自助解决记录：提交后直接是「已解决」，受理人是本人 */
+  selfResolved: boolean
   workOrderId: string | null
   error: string | null
   /** 打开确认/修改抽屉 */
@@ -33,6 +35,7 @@ export interface WorkOrderDraftCardProps {
 export function WorkOrderDraftCard({
   status,
   draft,
+  selfResolved,
   workOrderId,
   error,
   onOpen,
@@ -76,7 +79,7 @@ export function WorkOrderDraftCard({
             style={{ color: token.colorSuccess, fontSize: token.fontSizeHeading3, flexShrink: 0 }}
           />
           <div style={{ flex: 1, minWidth: 0 }}>
-            <Text strong>工单已创建</Text>
+            <Text strong>{selfResolved ? '自助解决记录已创建' : '工单已创建'}</Text>
             <div style={{ marginTop: 2 }}>
               <Text type="secondary">工单号：</Text>
               {workOrderId !== null ? (
@@ -89,7 +92,7 @@ export function WorkOrderDraftCard({
             </div>
           </div>
           <Button type="link" onClick={onView} style={{ flexShrink: 0 }}>
-            查看工单
+            {selfResolved ? '查看记录' : '查看工单'}
           </Button>
         </Flex>
       </Card>
@@ -108,6 +111,7 @@ export function WorkOrderDraftCard({
         <div style={{ flex: 1, minWidth: 0 }}>
           <Text strong>{draft.title}</Text>
           <Space size={6} wrap style={{ marginTop: 6, display: 'flex' }}>
+            {selfResolved && <Tag color="cyan">自助解决</Tag>}
             <DraftTags draft={draft} />
           </Space>
           <Typography.Paragraph

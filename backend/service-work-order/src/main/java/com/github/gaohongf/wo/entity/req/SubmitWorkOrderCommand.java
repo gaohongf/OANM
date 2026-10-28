@@ -27,8 +27,8 @@ import lombok.Data;
  * 收字符串再宽松解析，就能给出"只能是 demand 或 fault"这种能被直接理解的提示。
  *
  * <h2>为什么没有 status 字段</h2>
- * 新建的工单一律是 {@code NEW}，由服务端固定。让调用方在建单时自报"已解决"没有任何意义，
- * 只是给状态机开了个后门。
+ * 普通工单建单时一律是 {@code NEW}；自助解决记录由服务端的 {@code selfResolved} 标记
+ * 决定为 {@code RESOLVED}。状态始终由服务端推导，不接受调用方直接指定。
  */
 @Data
 public class SubmitWorkOrderCommand {
@@ -64,9 +64,13 @@ public class SubmitWorkOrderCommand {
     @Length(max = 16000, message = BaseValidationRsm.ORG_HIBERNATE_VALIDATOR_CONSTRAINTS_LENGTH_MESSAGE)
     private String originalProblemDescription;
 
-    /** AI 给出的解决方法 */
-    @Length(max = 16000, message = BaseValidationRsm.ORG_HIBERNATE_VALIDATOR_CONSTRAINTS_LENGTH_MESSAGE)
-    private String solutionDetail;
+    /**
+     * 是否为自助解决记录。
+     * <p>
+     * 为 true 时服务端把状态直接置为 {@code RESOLVED}、受理人置为建单人，
+     * 并且不发送"新工单"通知。默认 false，即普通工单。
+     */
+    private Boolean selfResolved;
 
     /**
      * AI 会话 ID，归档用。

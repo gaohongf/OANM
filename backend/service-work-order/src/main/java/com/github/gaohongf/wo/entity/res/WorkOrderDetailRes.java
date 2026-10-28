@@ -24,10 +24,7 @@ public class WorkOrderDetailRes extends WorkOrderRes {
      */
     private String originalProblemDescription;
 
-    /** AI 给出的解决方法 */
-    private String solutionDetail;
-
-    /** 用户在意图推断里选中的选项 id；手工建单时为 null */
+    /** 用户在意图推断里选中的选项 id；手工建单和自助解决记录为 null */
     private Integer aiSelectedOptionId;
 
     /**

@@ -152,6 +152,13 @@ export interface WorkOrderRow {
   type: WorkOrderType
   priority: WorkOrderPriority
   status: WorkOrderStatus
+  /**
+   * 是否自助解决记录。
+   *
+   * 这类记录创建时就是 `RESOLVED`、受理人是本人，统计也按 `RESOLVED` 算；
+   * 列表在状态旁标出来，不需要为它新增一个状态值。
+   */
+  selfResolved: boolean
   /** 同 `assigneeId`：解析失败时会退化成裸数字 */
   createBy: ResolvedUser | number | null
   /**
@@ -175,7 +182,7 @@ export interface WorkOrderDetail extends WorkOrderRow {
   problemDescription: string
   /** 用户原始描述，一行一轮 */
   originalProblemDescription: string | null
-  solutionDetail: string | null
+  /** 用户在意图推断里选中的选项；手工建单和自助解决记录为 null */
   aiSelectedOptionId: number | null
   assigneeNote: string | null
 }
@@ -186,7 +193,8 @@ export interface SubmitWorkOrderPayload {
   priority: string
   problemDescription: string
   originalProblemDescription?: string
-  solutionDetail?: string
+  /** true = 自助解决记录：服务端直接置为已解决、受理人是本人，不发建单通知 */
+  selfResolved?: boolean
   /** AI 会话 id，归档指针。手工建单时没有 */
   aiConversationId?: string
   aiSelectedOptionId?: number

@@ -14,9 +14,9 @@
 -- ------------------------------------------------------------
 -- 工单表
 --
--- 字段形状直接对齐 service-ai 生成的工单草稿 —— 标题、类型、优先级、描述、
--- 解决方法一一对应。刻意保持一一对应, 中间不做任何重命名, 这样"AI 给了什么、
--- 库里存了什么"一眼能对上, 排查时不用在脑子里做一次映射。
+-- 字段形状直接对齐 service-ai 生成的工单草稿 —— 标题、类型、优先级、描述一一对应。
+-- 刻意保持一一对应, 中间不做任何重命名, 这样"AI 给了什么、库里存了什么"一眼能对上。
+-- 工单不存解决方法: 具体怎么处理由受理人接手时决定, AI 只负责把问题整理清楚。
 -- ------------------------------------------------------------
 DROP TABLE IF EXISTS work_orders CASCADE;
 CREATE TABLE work_orders
@@ -33,7 +33,12 @@ CREATE TABLE work_orders
       各自独立的生命周期, 从不单独查询或修改, 拆表只会多一次 join。
     */
     original_problem_description TEXT          NULL,
-    solution_detail              TEXT          NULL,
+    /*
+      是否为自助解决记录。
+      true 表示用户依据 AI 给出的知识库建议自行处理完毕，建单时直接置为 RESOLVED，
+      受理人为建单人。它复用普通状态机，只是多一个来源标记。
+    */
+    self_resolved                BOOLEAN       NOT NULL DEFAULT FALSE,
     /*
       AI 会话 ID, 归档指针。
 
@@ -75,6 +80,9 @@ CREATE INDEX idx_work_orders_conversation ON work_orders (ai_conversation_id);
 -- "我的工单"按提交人 / 受理人过滤。已经在跑的库不要执行整份脚本(它是 drop/create), 手工补:
 --     CREATE INDEX IF NOT EXISTS idx_work_orders_create_by ON work_orders (create_by);
 --     CREATE INDEX IF NOT EXISTS idx_work_orders_assignee ON work_orders (assignee_id);
+-- 从上一版升级（删除解决方法字段、新增自助解决标记）:
+--     ALTER TABLE work_orders DROP COLUMN IF EXISTS solution_detail;
+--     ALTER TABLE work_orders ADD COLUMN IF NOT EXISTS self_resolved BOOLEAN NOT NULL DEFAULT FALSE;
 CREATE INDEX idx_work_orders_create_by ON work_orders (create_by);
 CREATE INDEX idx_work_orders_assignee ON work_orders (assignee_id);
 
@@ -85,7 +93,7 @@ COMMENT ON COLUMN work_orders.type IS '工单类型: DEMAND-需求 FAULT-故障'
 COMMENT ON COLUMN work_orders.priority IS '优先级: LOW/MEDIUM/HIGH/URGENT';
 COMMENT ON COLUMN work_orders.problem_description IS 'AI 整理后的工单描述';
 COMMENT ON COLUMN work_orders.original_problem_description IS '用户原始描述, 一行一轮(补充几次就有几行)';
-COMMENT ON COLUMN work_orders.solution_detail IS 'AI 给出的解决方法';
+COMMENT ON COLUMN work_orders.self_resolved IS '是否自助解决记录: true-用户自行解决, 建单即RESOLVED';
 COMMENT ON COLUMN work_orders.ai_conversation_id IS 'AI 会话ID, 指向 spring_ai_chat_memory.conversation_id';
 COMMENT ON COLUMN work_orders.ai_selected_option_id IS '用户在意图推断里选中的选项 id';
 COMMENT ON COLUMN work_orders.assignee_id IS '受理人ID';

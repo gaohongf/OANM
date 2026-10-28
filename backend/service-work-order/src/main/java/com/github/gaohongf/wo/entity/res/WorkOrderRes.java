@@ -15,10 +15,9 @@ import lombok.Data;
  * 而且它看起来完全正常，直到拿它去查详情时才发现查不到。序列化成字符串是唯一安全的做法。
  * 同理，本接口的建单返回值也是 String。
  *
- * <h2>为什么这里没有描述、解决方法这类长文本</h2>
- * {@code solution_detail} 是模型生成的正文，可能上千字。列表一页 10 行就是十几 KB 的
- * 无用载荷，而它们要打开抽屉才看得到。所以列表只给摘要，正文由
- * {@link WorkOrderDetailRes} 按 id 单独取。
+ * <h2>为什么这里没有描述这类长文本</h2>
+ * 工单描述可能上千字。列表一页 10 行就是十几 KB 的无用载荷，而它要打开抽屉才看得到。
+ * 所以列表只给摘要，正文由 {@link WorkOrderDetailRes} 按 id 单独取。
  *
  * <h2>{@link User} 标在 createBy / assigneeId 上</h2>
  * 库里只存 id，序列化时才换成用户对象（见 common 的 {@code ResolveStrategyRegistry}）：
@@ -40,6 +39,14 @@ public class WorkOrderRes {
 
     /** 状态: NEW / ACCEPTED / RESOLVED / CLOSED */
     private String status;
+
+    /**
+     * 是否自助解决记录。
+     * <p>
+     * 这类记录创建时状态就是 {@code RESOLVED}、受理人是本人。列表在状态旁标出来，
+     * 统计仍按 {@code RESOLVED} 计算，不需要为它新增状态值。
+     */
+    private Boolean selfResolved;
 
     /**
      * 创建人。username 默认开启, nickname 默认关闭。

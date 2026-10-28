@@ -26,7 +26,6 @@ export interface ManualWorkOrderValues {
   priority: WorkOrderPriority
   problemDescription: string
   originalProblemDescription?: string
-  solutionDetail?: string
 }
 
 interface ManualWorkOrderDrawerProps {
@@ -44,7 +43,7 @@ interface ManualWorkOrderDrawerProps {
  *
  * ## 选填字段提交前归一化
  * 只输入空格等同于没填，转成 `undefined` 再发出去，避免在详情里留下一段看不见内容的
- * 「原始描述」或「解决方法」。
+ * 「原始描述」。
  */
 export function ManualWorkOrderDrawer({ open, onClose, onCreated }: ManualWorkOrderDrawerProps) {
   const { message } = AntdApp.useApp()
@@ -69,7 +68,6 @@ export function ManualWorkOrderDrawer({ open, onClose, onCreated }: ManualWorkOr
             priority: values.priority,
             problemDescription: values.problemDescription.trim(),
             originalProblemDescription: values.originalProblemDescription?.trim() || undefined,
-            solutionDetail: values.solutionDetail?.trim() || undefined,
           })
           message.success('工单已提交')
           onCreated(id)
@@ -148,15 +146,6 @@ export function ManualWorkOrderDrawer({ open, onClose, onCreated }: ManualWorkOr
           extra="选填。一行一轮，作为问题最初描述的归档。"
         >
           <TextArea rows={3} maxLength={16000} placeholder="问题最初是怎么描述的" />
-        </Form.Item>
-
-        <Form.Item
-          name="solutionDetail"
-          label="解决方法"
-          rules={[{ max: 16000, message: '最长 16000 个字符' }]}
-          extra="选填。可以留空，等受理人处理时再补充。"
-        >
-          <TextArea rows={6} maxLength={16000} placeholder="建议的处理步骤" />
         </Form.Item>
       </Form>
     </Drawer>

@@ -22,8 +22,10 @@ export interface SseStartPayload {
 /**
  * `chat` 事件的一帧：工作流某个节点的一次输出。
  *
- * `n` 是节点名 —— 同一轮里不会变，所以它在流里出现一次就能定下"这一轮是追问还是选项"。
- * `d` 的形状由节点决定：文字节点给 token 字符串，结构化节点给对象。
+ * `n` 是节点名，`d` 的形状由节点决定：文字节点给 token 字符串，结构化节点给对象。
+ * 一轮里通常只有一个节点作答；但自助解决会先给步骤（`self_service_reply`）、
+ * 紧接着给决策卡片（`self_service_choices`），所以同一轮可能依次出现两个节点名，
+ * 调用方应以最后一次为准。
  */
 export interface SseChatFrame {
   /** 节点名，如 `ask` / `options` */

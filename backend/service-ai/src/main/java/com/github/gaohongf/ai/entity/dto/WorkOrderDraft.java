@@ -34,7 +34,4 @@ public class WorkOrderDraft {
 
     @Schema(description = "整理后的工单描述")
     private String problemDescription;
-
-    @Schema(description = "解决方法")
-    private String solutionDetail;
 }

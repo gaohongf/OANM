@@ -27,6 +27,7 @@ import com.github.gaohongf.auth.resolve.UserLookup;
 import com.github.gaohongf.auth.res.UserAuthorities;
 import com.github.gaohongf.auth.res.UserRes;
 import com.github.gaohongf.model.PageRes;
+import com.github.gaohongf.mybatis.AuditMetaObjectHandler;
 import com.github.gaohongf.wo.dao.WorkOrderDao;
 import com.github.gaohongf.wo.entity.po.WorkOrderEntity;
 import com.github.gaohongf.wo.entity.po.WorkOrderStatus;
@@ -620,21 +621,32 @@ public class WorkOrderServiceImpl implements WorkOrderService {
         entity.setPriority(command.toPriority());
         entity.setProblemDescription(command.getProblemDescription().trim());
         entity.setOriginalProblemDescription(normalizeRounds(command.getOriginalProblemDescription()));
-        entity.setSolutionDetail(trimToNull(command.getSolutionDetail()));
         entity.setAiConversationId(trimToNull(command.getAiConversationId()));
         entity.setAiSelectedOptionId(command.getAiSelectedOptionId());
-        // 状态由服务端定, 入参里没有这个字段 —— 见 WorkOrderStatus 的说明
-        entity.setStatus(WorkOrderStatus.NEW);
+
+        // 状态由服务端定, 入参里没有 status 字段 —— 见 WorkOrderStatus 的说明。
+        // 自助解决记录复用 RESOLVED，不新增状态值；受理人就是建单人。
+        boolean selfResolved = Boolean.TRUE.equals(command.getSelfResolved());
+        entity.setSelfResolved(selfResolved);
+        entity.setStatus(selfResolved ? WorkOrderStatus.RESOLVED : WorkOrderStatus.NEW);
+        if (selfResolved) {
+            // 审计字段的填充只在字段为空时生效，所以这里显式写入 createBy，
+            // 同时把 assignee 一起定下，避免插入后再补一次 UPDATE。
+            Long operatorId = AuditMetaObjectHandler.currentOperatorId();
+            entity.setCreateBy(operatorId);
+            entity.setAssigneeId(operatorId);
+        }
 
         // ASSIGN_ID 在插入前就把雪花 id 填回 entity, 所以插入后能直接取
         workOrderDao.insert(entity);
 
-        // 建单之后要做的旁路事情(通知超管)由事件带出去 —— 这里不认识消息模块,
+        // 自助解决记录不需要通知超管：它已经是终态，也没有人需要去处理。
+        // 普通工单的旁路事情(通知超管)由事件带出去 —— 这里不认识消息模块,
         // 消息发不出去也不会影响建单, 理由见 WorkOrderCreatedNotifier。
-        // createBy 用的是实体上那个审计字段而不是再取一次登录态: 它就是插入时写入的建单人,
-        // 此刻一定已经有了（取不到登录态时为 null, 那时通知按系统消息发）。
-        eventPublisher.publishEvent(new WorkOrderCreatedEvent(
-                entity.getId(), entity.getTitle(), entity.getType(), entity.getCreateBy()));
+        if (!selfResolved) {
+            eventPublisher.publishEvent(new WorkOrderCreatedEvent(
+                    entity.getId(), entity.getTitle(), entity.getType(), entity.getCreateBy()));
+        }
 
         return entity.getId();
     }

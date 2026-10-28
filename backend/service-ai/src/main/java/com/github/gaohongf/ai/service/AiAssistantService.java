@@ -32,6 +32,13 @@ public interface AiAssistantService {
     Flux<ServerSentEvent<String>> workOrderDraftGenerate(String id, Integer userSelect);
 
     /**
+     * 用户在自助解决建议之后点击了「已经解决了」或「还没解决，帮我提工单」。
+     *
+     * @param action {@code SELF_RESOLVED} 或 {@code WORK_ORDER}
+     */
+    Flux<ServerSentEvent<String>> workOrderDecision(String id, String action);
+
+    /**
      * 用户确认草稿后提交建单。
      *
      * @param token 浏览器带来的 {@code satoken}，原样透传给工单服务

@@ -1,5 +1,7 @@
 package com.github.gaohongf.ai.util;
 
+import org.springframework.ai.converter.StructuredOutputConverter;
+
 import reactor.core.publisher.Flux;
 
 /**
@@ -7,4 +9,5 @@ import reactor.core.publisher.Flux;
  */
 public interface AIOutputHandler<T> {
     Flux<T> handle(Flux<String> output);
+    StructuredOutputConverter<T> getConverter();
 }

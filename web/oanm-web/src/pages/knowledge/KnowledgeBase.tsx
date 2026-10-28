@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useMemo, useRef, useState, useSyncExternalStore } from 'react'
 import type { CSSProperties } from 'react'
+import { useSearchParams } from 'react-router'
 import { Alert, App as AntdApp, Button, Input, Spin } from 'antd'
 import { EyeOutlined, SearchOutlined } from '@ant-design/icons'
 
@@ -111,6 +112,18 @@ export default function KnowledgeBase() {
 
   const [drawerOpen, setDrawerOpen] = useState(false)
   const [detailId, setDetailId] = useState<string | null>(null)
+
+  const [searchParams, setSearchParams] = useSearchParams()
+  /**
+   * `?openId=` 是这个页面的外部入口：智能提单里的「参考知识」链接直接带文章 id 过来。
+   * 用查询参数而不是全局状态，链接可以收藏、可以新开标签页打开。
+   *
+   * 直接由参数派生打开状态，而不是在 effect 里 setState —— 后者会多渲染一帧，
+   * 而且浏览器前进/后退换 id 时不会重新触发。
+   */
+  const openId = searchParams.get('openId')
+  const activeDetailId = openId !== null && openId !== '' ? openId : detailId
+  const activeDrawerOpen = drawerOpen || (openId !== null && openId !== '')
 
   const isSearching = keyword.length > 0
 
@@ -333,6 +346,12 @@ export default function KnowledgeBase() {
 
   const closeDetail = () => {
     setDrawerOpen(false)
+    // 关掉就把入口参数一并抹掉：否则刷新页面又把抽屉打开一次
+    if (searchParams.has('openId')) {
+      const next = new URLSearchParams(searchParams)
+      next.delete('openId')
+      setSearchParams(next, { replace: true })
+    }
   }
 
   const hasFilters = isSearching || categoryId !== undefined
@@ -519,8 +538,8 @@ export default function KnowledgeBase() {
         ) : null}
 
         <KnowledgeDetailDrawer
-          open={drawerOpen}
-          articleId={detailId}
+          open={activeDrawerOpen}
+          articleId={activeDetailId}
           onClose={closeDetail}
           onViewed={markViewed}
         />

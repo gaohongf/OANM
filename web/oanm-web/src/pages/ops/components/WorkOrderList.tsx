@@ -81,8 +81,8 @@ interface WorkOrderListProps {
  * 工单列表（工单管理 / 我的工单共用）。
  *
  * ## 列表与详情是两个接口
- * 表格只取摘要（标题/类型/优先级/状态/创建人/时间），正文（描述、解决方法）由抽屉
- * 按 id 单独拉。原因是解决方法那一段是模型生成的长文，一页 10 行可能就有十几 KB，
+ * 表格只取摘要（标题/类型/优先级/状态/创建人/时间），正文（描述、原始描述）由抽屉
+ * 按 id 单独拉。原因是描述和用户原话可能是长文，一页 10 行可能就有十几 KB，
  * 而它们要打开抽屉才看得到。
  *
  * ## 创建人这一列在演示什么
@@ -513,6 +513,8 @@ export function WorkOrderList({ mode }: WorkOrderListProps) {
             render: (_: unknown, record) => (
               <Space size={4} wrap>
                 <StatusTag status={record.status} />
+                {/* 自助解决记录复用「已解决」状态，靠这个标记与人工结单区分 */}
+                {record.selfResolved && <Tag color="cyan">自助解决</Tag>}
                 {/* 取消申请复用“已受理”这个状态，这里单独标出来，
                     否则列表上看不出它正在等谁处理 */}
                 {record.cancelRequestedAt && <Tag color="warning">取消待确认</Tag>}
@@ -666,6 +668,7 @@ export function WorkOrderList({ mode }: WorkOrderListProps) {
                 children: (
                   <Space size={4} wrap>
                     <StatusTag status={detail.status} />
+                    {detail.selfResolved && <Tag color="cyan">自助解决</Tag>}
                     {detail.cancelRequestedAt && <Tag color="warning">取消待确认</Tag>}
                   </Space>
                 ),
@@ -712,16 +715,6 @@ export function WorkOrderList({ mode }: WorkOrderListProps) {
                 label: '原始描述',
                 span: 2,
                 children: <OriginalRounds text={detail.originalProblemDescription} />,
-              },
-              {
-                key: 'solution',
-                label: '解决方法',
-                span: 2,
-                children: (
-                  <Paragraph style={{ margin: 0, whiteSpace: 'pre-wrap' }}>
-                    {detail.solutionDetail || '-'}
-                  </Paragraph>
-                ),
               },
               {
                 key: 'assigneeNote',
