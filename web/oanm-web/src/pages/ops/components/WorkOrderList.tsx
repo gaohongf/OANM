@@ -8,6 +8,7 @@ import {
   Drawer,
   Dropdown,
   Empty,
+  Image,
   Input,
   Modal,
   Popconfirm,
@@ -710,6 +711,31 @@ export function WorkOrderList({ mode }: WorkOrderListProps) {
                 span: 2,
                 children: <Paragraph style={{ margin: 0 }}>{detail.problemDescription}</Paragraph>,
               },
+              ...(detail.imageUrls.length > 0
+                ? [
+                    {
+                      key: 'images',
+                      label: '现场图片',
+                      span: 2,
+                      children: (
+                        <Image.PreviewGroup>
+                          <Space size={6} wrap>
+                            {detail.imageUrls.map((url) => (
+                              <Image
+                                key={url}
+                                src={url}
+                                alt="现场图片"
+                                width={96}
+                                height={96}
+                                style={{ objectFit: 'cover', borderRadius: 4 }}
+                              />
+                            ))}
+                          </Space>
+                        </Image.PreviewGroup>
+                      ),
+                    },
+                  ]
+                : []),
               {
                 key: 'original',
                 label: '原始描述',

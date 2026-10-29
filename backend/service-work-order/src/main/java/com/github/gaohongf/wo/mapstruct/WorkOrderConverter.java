@@ -1,8 +1,10 @@
 package com.github.gaohongf.wo.mapstruct;
 
+import java.util.Arrays;
 import java.util.List;
 
 import org.mapstruct.Mapper;
+import org.springframework.util.StringUtils;
 
 import com.github.gaohongf.wo.entity.po.WorkOrderEntity;
 import com.github.gaohongf.wo.entity.res.RecentWorkOrderRes;
@@ -36,4 +38,20 @@ public interface WorkOrderConverter {
     RecentWorkOrderRes toRecentRes(WorkOrderEntity entity);
 
     List<RecentWorkOrderRes> toRecentResList(List<WorkOrderEntity> entities);
+
+    /**
+     * 库里的"一行一个"图片地址 → 响应里的数组。
+     * <p>
+     * MapStruct 发现这个 String → List&lt;String&gt; 的默认方法后会自动用它转换
+     * {@code imageUrls}，不需要在 {@code @Mapping} 里再写表达式。
+     */
+    default List<String> toImageUrls(String imageUrls) {
+        if (!StringUtils.hasText(imageUrls)) {
+            return List.of();
+        }
+        return Arrays.stream(imageUrls.split("\n"))
+                .map(String::trim)
+                .filter(url -> !url.isEmpty())
+                .toList();
+    }
 }

@@ -261,6 +261,12 @@ public class WorkOrderWorkflowLauncher implements IWorkOrderWorkflowRunner {
                 return Flux.error(new UnsupportedOperationException("v1 工作流不支持自助解决决策"));
         }
 
+        /** v1 的识图结果不做图片筛选，也没有可供建单使用的有效图片列表。 */
+        @Override
+        public List<String> workOrderImages(String threadId) {
+                return List.of();
+        }
+
         private static Flux<SseElement> toSse(Flux<NodeOutput> outputs, String threadId) {
                 return outputs
                                 .filter(output -> output instanceof StreamingOutput)

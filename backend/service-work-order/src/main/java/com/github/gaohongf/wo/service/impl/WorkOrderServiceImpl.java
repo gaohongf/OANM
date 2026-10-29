@@ -6,6 +6,7 @@ import java.time.LocalDateTime;
 import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.HashMap;
+import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Map;
 import java.util.Optional;
@@ -69,6 +70,9 @@ public class WorkOrderServiceImpl implements WorkOrderService {
 
     /** 概览"最近动态"的条数。再多就不是"最近"了，而是第二个列表页 */
     private static final int RECENT_LIMIT = 6;
+
+    /** 单条图片地址的长度上限：正常上传地址远小于它，这里只防异常长的 query。 */
+    private static final int MAX_IMAGE_URL_LENGTH = 512;
 
     private final WorkOrderDao workOrderDao;
     private final WorkOrderConverter workOrderConverter;
@@ -621,6 +625,7 @@ public class WorkOrderServiceImpl implements WorkOrderService {
         entity.setPriority(command.toPriority());
         entity.setProblemDescription(command.getProblemDescription().trim());
         entity.setOriginalProblemDescription(normalizeRounds(command.getOriginalProblemDescription()));
+        entity.setImageUrls(normalizeImageUrls(command.getImageUrls()));
         entity.setAiConversationId(trimToNull(command.getAiConversationId()));
         entity.setAiSelectedOptionId(command.getAiSelectedOptionId());
 
@@ -730,5 +735,44 @@ public class WorkOrderServiceImpl implements WorkOrderService {
     /** 空白串一律归一成 null，避免同一个"没填"在库里有两种存法。 */
     private static String trimToNull(String text) {
         return StringUtils.hasText(text) ? text.trim() : null;
+    }
+
+    /**
+     * 校验图片地址并落成"一行一个"的文本。
+     *
+     * <p>
+     * 只放行两种地址：本项目的上传路径（{@code /file/...}）和明确的 http(s) 链接。
+     * 这些值最终会渲染成 {@code <img src>}，{@code javascript:} / {@code data:} 之类
+     * 没有正当用途，直接拒绝。重复的链接只留一份，用户重复上传同一张图不会让工单里
+     * 出现两条一模一样的记录。
+     */
+    private static String normalizeImageUrls(List<String> imageUrls) {
+        if (imageUrls == null || imageUrls.isEmpty()) {
+            return null;
+        }
+        LinkedHashSet<String> normalized = new LinkedHashSet<>();
+        for (String raw : imageUrls) {
+            if (!StringUtils.hasText(raw)) {
+                return R.error(WorkOrderRsm.WORK_ORDER_IMAGE_URL_INVALID);
+            }
+            String url = raw.trim();
+            // 换行是存储格式的分隔符，地址自己带换行会把一条链接拆成两条
+            if (url.length() > MAX_IMAGE_URL_LENGTH
+                    || url.contains("\n")
+                    || url.contains("\r")
+                    || !isAllowedImageUrl(url)) {
+                return R.error(WorkOrderRsm.WORK_ORDER_IMAGE_URL_INVALID);
+            }
+            normalized.add(url);
+        }
+        return String.join("\n", normalized);
+    }
+
+    private static boolean isAllowedImageUrl(String url) {
+        if (url.startsWith("/file/")) {
+            // 相对地址会被拼到网关后面请求，不允许跳出 /file/ 目录
+            return !url.contains("..");
+        }
+        return url.startsWith("https://") || url.startsWith("http://");
     }
 }

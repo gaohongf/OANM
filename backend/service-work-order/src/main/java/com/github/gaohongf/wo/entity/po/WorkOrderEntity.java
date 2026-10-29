@@ -85,6 +85,16 @@ public class WorkOrderEntity extends BaseEntity {
     private String originalProblemDescription;
 
     /**
+     * 现场图片链接，一行一个。
+     * <p>
+     * AI 建单时来自对话里被识图节点筛过的有效图片；手工建单可以没有。
+     * 用多行文本而不是子表：这些链接没有各自独立的生命周期，从不单独查询或修改，
+     * 拆表只会多一次 join，和 {@link #originalProblemDescription} 是同一个取舍。
+     * 接口上再拆成数组返回，见 {@code WorkOrderDetailRes#imageUrls}。
+     */
+    private String imageUrls;
+
+    /**
      * 是否为自助解决记录。
      * <p>
      * 用户依据 AI 给出的知识库建议自行处理完毕后创建。建单时状态直接是

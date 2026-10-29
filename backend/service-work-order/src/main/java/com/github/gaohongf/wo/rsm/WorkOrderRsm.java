@@ -35,6 +35,16 @@ public class WorkOrderRsm implements RsmManager {
     public static final String WORK_ORDER_PRIORITY_INVALID = "WorkOrder_WORK_ORDER_PRIORITY_INVALID";
 
     /**
+     * 现场图片地址不合法。
+     * <p>
+     * 只接受两种：本项目上传接口返回的相对地址（{@code /file/...}），以及明确以
+     * {@code http://} / {@code https://} 开头的链接。这个字段最终会渲染成 {@code <img src>}，
+     * 放行 {@code javascript:} / {@code data:} 之类的前缀没有正当用途。
+     */
+    @RsmInfo(template = "图片地址不合法，只支持上传得到的相对地址或 http(s) 链接", status = HttpStatus.BAD_REQUEST)
+    public static final String WORK_ORDER_IMAGE_URL_INVALID = "WorkOrder_WORK_ORDER_IMAGE_URL_INVALID";
+
+    /**
      * 列表筛选传了不认识的状态。
      * <p>
      * 这里拒绝而不是忽略，是因为"忽略"的表现是<b>返回全部工单</b> —— 界面上看起来

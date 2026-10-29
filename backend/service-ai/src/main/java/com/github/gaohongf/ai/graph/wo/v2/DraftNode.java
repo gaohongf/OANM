@@ -1,5 +1,6 @@
 package com.github.gaohongf.ai.graph.wo.v2;
 
+import java.util.List;
 import java.util.Map;
 
 import org.springframework.ai.chat.client.ChatClient;
@@ -64,6 +65,14 @@ public class DraftNode extends AINode {
         if (draft == null) {
             throw new RequestException("模型没有返回工单内容");
         }
+        // 图片不是模型生成的：取会话状态里识图节点筛出来的有效链接，原样附到草稿上。
+        // 草稿图只负责让用户在提交前看见会带哪些图，提交时以会话状态为准。
+        draft.setImageUrls(state.value("imageUrls", List.class)
+                .map(items -> items.stream()
+                        .filter(String.class::isInstance)
+                        .map(String.class::cast)
+                        .toList())
+                .orElse(List.of()));
         return Map.of("workOrderDraft", Flux.just(draft));
     }
 }

@@ -1,5 +1,7 @@
 package com.github.gaohongf.ai.entity.dto;
 
+import java.util.List;
+
 import io.swagger.v3.oas.annotations.media.Schema;
 import lombok.AllArgsConstructor;
 import lombok.Data;
@@ -34,4 +36,13 @@ public class WorkOrderDraft {
 
     @Schema(description = "整理后的工单描述")
     private String problemDescription;
+
+    /**
+     * 本次会话里被识图节点判定为有效的现场图片。
+     * <p>
+     * 不交给模型生成：它是工作流状态里的事实，模型没有能力也不应该决定
+     * 哪张图跟着工单走。生成草稿的节点在模型返回之后把它原样填进来。
+     */
+    @Schema(description = "现场图片链接")
+    private List<String> imageUrls;
 }

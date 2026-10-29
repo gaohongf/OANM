@@ -34,6 +34,13 @@ CREATE TABLE work_orders
     */
     original_problem_description TEXT          NULL,
     /*
+      现场图片链接, 一行一个。
+      AI 建单时来自对话里被识图节点筛过的有效图片（表情包、无关图片已被过滤）;
+      手工建单可以没有。多行文本而不是子表: 这些链接没有各自独立的生命周期,
+      从不单独查询或修改, 与 original_problem_description 是同一个取舍。
+    */
+    image_urls                   TEXT          NULL,
+    /*
       是否为自助解决记录。
       true 表示用户依据 AI 给出的知识库建议自行处理完毕，建单时直接置为 RESOLVED，
       受理人为建单人。它复用普通状态机，只是多一个来源标记。
@@ -80,9 +87,10 @@ CREATE INDEX idx_work_orders_conversation ON work_orders (ai_conversation_id);
 -- "我的工单"按提交人 / 受理人过滤。已经在跑的库不要执行整份脚本(它是 drop/create), 手工补:
 --     CREATE INDEX IF NOT EXISTS idx_work_orders_create_by ON work_orders (create_by);
 --     CREATE INDEX IF NOT EXISTS idx_work_orders_assignee ON work_orders (assignee_id);
--- 从上一版升级（删除解决方法字段、新增自助解决标记）:
+-- 从上一版升级（删除解决方法字段、新增自助解决标记与现场图片）:
 --     ALTER TABLE work_orders DROP COLUMN IF EXISTS solution_detail;
 --     ALTER TABLE work_orders ADD COLUMN IF NOT EXISTS self_resolved BOOLEAN NOT NULL DEFAULT FALSE;
+--     ALTER TABLE work_orders ADD COLUMN IF NOT EXISTS image_urls TEXT NULL;
 CREATE INDEX idx_work_orders_create_by ON work_orders (create_by);
 CREATE INDEX idx_work_orders_assignee ON work_orders (assignee_id);
 
@@ -93,6 +101,7 @@ COMMENT ON COLUMN work_orders.type IS '工单类型: DEMAND-需求 FAULT-故障'
 COMMENT ON COLUMN work_orders.priority IS '优先级: LOW/MEDIUM/HIGH/URGENT';
 COMMENT ON COLUMN work_orders.problem_description IS 'AI 整理后的工单描述';
 COMMENT ON COLUMN work_orders.original_problem_description IS '用户原始描述, 一行一轮(补充几次就有几行)';
+COMMENT ON COLUMN work_orders.image_urls IS '现场图片链接, 一行一个, 已过滤表情包与无关图片';
 COMMENT ON COLUMN work_orders.self_resolved IS '是否自助解决记录: true-用户自行解决, 建单即RESOLVED';
 COMMENT ON COLUMN work_orders.ai_conversation_id IS 'AI 会话ID, 指向 spring_ai_chat_memory.conversation_id';
 COMMENT ON COLUMN work_orders.ai_selected_option_id IS '用户在意图推断里选中的选项 id';

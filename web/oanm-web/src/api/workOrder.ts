@@ -182,6 +182,11 @@ export interface WorkOrderDetail extends WorkOrderRow {
   problemDescription: string
   /** 用户原始描述，一行一轮 */
   originalProblemDescription: string | null
+  /**
+   * 现场图片链接。AI 建单时已在识图节点过滤掉表情包与无关图片；
+   * 手工建单和没有附图时为 []。
+   */
+  imageUrls: string[]
   /** 用户在意图推断里选中的选项；手工建单和自助解决记录为 null */
   aiSelectedOptionId: number | null
   assigneeNote: string | null

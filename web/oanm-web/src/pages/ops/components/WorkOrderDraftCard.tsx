@@ -112,6 +112,9 @@ export function WorkOrderDraftCard({
           <Text strong>{draft.title}</Text>
           <Space size={6} wrap style={{ marginTop: 6, display: 'flex' }}>
             {selfResolved && <Tag color="cyan">自助解决</Tag>}
+            {draft.imageUrls.length > 0 && (
+              <Tag color="geekblue">现场图片 {draft.imageUrls.length}</Tag>
+            )}
             <DraftTags draft={draft} />
           </Space>
           <Typography.Paragraph

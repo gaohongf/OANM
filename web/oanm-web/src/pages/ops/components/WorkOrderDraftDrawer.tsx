@@ -1,4 +1,4 @@
-import { Button, Drawer, Flex, Form, Input, Select, Typography } from 'antd'
+import { Button, Drawer, Flex, Form, Image, Input, Select, Space, Typography } from 'antd'
 
 import type { WorkOrderDraft } from '../../../api/ai'
 import {
@@ -123,6 +123,9 @@ export function WorkOrderDraftDrawer({
             type: values.type ?? '',
             priority: values.priority ?? '',
             problemDescription: values.problemDescription ?? '',
+            // 图片不在这张表单里编辑，但草稿对象要原样带着它们，
+            // 否则用户改一次标题就把待提交的图片弄丢了。
+            imageUrls: draft?.imageUrls ?? [],
           })
         }}
       >
@@ -159,6 +162,28 @@ export function WorkOrderDraftDrawer({
             extra="你在对话里说过的原话，一行一轮，随工单一起归档。"
           >
             <TextArea value={originalDescription} readOnly rows={4} />
+          </Form.Item>
+        )}
+
+        {draft !== null && draft.imageUrls.length > 0 && (
+          <Form.Item
+            label={`现场图片（${draft.imageUrls.length}）`}
+            extra="AI 从对话里的图片中筛出的有效图片，随工单一起保存。"
+          >
+            <Image.PreviewGroup>
+              <Space size={6} wrap>
+                {draft.imageUrls.map((url) => (
+                  <Image
+                    key={url}
+                    src={url}
+                    alt="现场图片"
+                    width={88}
+                    height={88}
+                    style={{ objectFit: 'cover', borderRadius: 4 }}
+                  />
+                ))}
+              </Space>
+            </Image.PreviewGroup>
           </Form.Item>
         )}
       </Form>

@@ -1,13 +1,21 @@
 package com.github.gaohongf.ai.graph.wo.v2;
 
 import java.util.HashMap;
+import java.util.Iterator;
 import java.util.Map;
+import java.util.regex.Matcher;
+import java.util.regex.Pattern;
 
 import org.springframework.ai.chat.client.ChatClient;
 import org.springframework.ai.chat.memory.ChatMemory;
 import org.springframework.util.StringUtils;
 
 import com.alibaba.cloud.ai.graph.OverAllState;
+import com.fasterxml.jackson.core.JsonProcessingException;
+import com.fasterxml.jackson.databind.JsonNode;
+import com.fasterxml.jackson.databind.ObjectMapper;
+
+import lombok.extern.slf4j.Slf4j;
 
 /**
  * 输入护栏：判断这一轮的用户输入是否属于运维范畴。
@@ -21,6 +29,7 @@ import com.alibaba.cloud.ai.graph.OverAllState;
  * 单独看是句客套话，放在 DECISION 阶段里就是对"解决了没有"的回答。
  * 只凭这一句话做判断，模型会把它拦掉。
  */
+@Slf4j
 public class GuardrailNode extends AINode {
 
     /**
@@ -43,6 +52,12 @@ public class GuardrailNode extends AINode {
             用户这一轮输入：
             {userInput}
             """;
+
+    /** 纯文本回复里独立的 true / false。前后要求非单词字符，避免命中 "untrue" 之类的词。 */
+    private static final Pattern BOOLEAN_TOKEN =
+            Pattern.compile("\\b(true|false)\\b", Pattern.CASE_INSENSITIVE);
+
+    private static final ObjectMapper OBJECT_MAPPER = new ObjectMapper();
 
     public GuardrailNode(ChatClient chatClient, String systemPrompt) {
         super(chatClient);
@@ -68,10 +83,15 @@ public class GuardrailNode extends AINode {
         }
 
         String userInput = state.value("userInput", String.class).orElse("");
-        Boolean content = prompt(Map.of("userInput", userInput, "phase", phaseHint(state)))
+        String reply = prompt(Map.of("userInput", userInput, "phase", phaseHint(state)))
                 .advisors(a -> a.param(ChatMemory.CONVERSATION_ID, conversationId(state)))
                 .call()
-                .entity(Boolean.class);
+                .content();
+        Boolean content = parseVerdict(reply);
+        if (content == null) {
+            log.warn("护栏判定没有解析出 true/false，按不放行处理: conversationId={}, reply={}",
+                    conversationId(state), reply);
+        }
 
         // 模型没给出明确 true 时按不放行处理：护栏宁可多挡一次
         boolean passed = Boolean.TRUE.equals(content);
@@ -98,5 +118,78 @@ public class GuardrailNode extends AINode {
             case WorkflowPhase.WORK_ORDER -> "已经确定要人工处理，正在补齐时间、地点等信息";
             default -> "正在了解用户遇到的问题";
         };
+    }
+
+    /**
+     * 从模型回复里取出判定结果。
+     *
+     * <p>
+     * 不用 {@code .entity(Boolean.class)}：它要求模型把整段回复写成一个裸布尔值，
+     * 模型偶尔会回成 {@code {"allowed": true}} 这类对象，Jackson 在根节点就抛
+     * MismatchedInputException，整条会话随之中断。改成先拿文本再自己解析，
+     * 裸 true/false、JSON 对象里的布尔值、"true，属于运维问题" 都能认；
+     * 一段回复里既说 true 又说 false 时判为无法确定。
+     *
+     * @return 解析不出返回 null，调用方按"不放行"处理
+     */
+    private static Boolean parseVerdict(String reply) {
+        if (!StringUtils.hasText(reply)) {
+            return null;
+        }
+        String text = stripCodeFence(reply.strip());
+        try {
+            // 合法 JSON 就以里面的布尔值为准；没有布尔字段时直接判为无法确定，
+            // 不再对 JSON 原文做关键字扫描，避免把字符串里的 "true" 当成结论
+            return firstBoolean(OBJECT_MAPPER.readTree(text));
+        } catch (JsonProcessingException ignored) {
+            // 不是合法 JSON（例如结论后面跟了一句解释），按普通文本处理
+        }
+
+        Boolean found = null;
+        Matcher matcher = BOOLEAN_TOKEN.matcher(text);
+        while (matcher.find()) {
+            boolean value = Boolean.parseBoolean(matcher.group(1));
+            if (found != null && found != value) {
+                return null;
+            }
+            found = value;
+        }
+        return found;
+    }
+
+    /** 模型有时把 JSON 包在 ``` 围栏里。单行围栏（```true```）剥不出来就交给文本扫描。 */
+    private static String stripCodeFence(String text) {
+        if (!text.startsWith("```")) {
+            return text;
+        }
+        int start = text.indexOf('\n');
+        int end = text.lastIndexOf("```");
+        if (start < 0 || end <= start) {
+            return text;
+        }
+        return text.substring(start + 1, end).strip();
+    }
+
+    /** JSON 里第一个布尔值；对象/数组里出现互相矛盾的布尔值时返回 null。 */
+    private static Boolean firstBoolean(JsonNode node) {
+        if (node.isBoolean()) {
+            return node.booleanValue();
+        }
+        if (!node.isContainerNode()) {
+            return null;
+        }
+        Boolean found = null;
+        Iterator<JsonNode> values = node.elements();
+        while (values.hasNext()) {
+            Boolean value = firstBoolean(values.next());
+            if (value == null) {
+                continue;
+            }
+            if (found != null && !found.equals(value)) {
+                return null;
+            }
+            found = value;
+        }
+        return found;
     }
 }

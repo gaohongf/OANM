@@ -1,5 +1,7 @@
 package com.github.gaohongf.ai.client;
 
+import java.util.List;
+
 import lombok.Data;
 
 /**
@@ -21,4 +23,6 @@ public class WorkOrderCreateCommand {
     private Integer aiSelectedOptionId;
     /** true 时工单服务把记录直接置为已解决、受理人为建单人 */
     private Boolean selfResolved;
+    /** 会话里筛出的有效现场图片，建单时随工单保存 */
+    private List<String> imageUrls;
 }

@@ -163,6 +163,9 @@ public class AiAssistantServiceImpl implements AiAssistantService {
         create.setProblemDescription(command.getProblemDescription().trim());
         create.setOriginalProblemDescription(command.getOriginalProblemDescription());
         create.setSelfResolved(selfResolved);
+        // 图片同样从会话状态取：识图节点筛掉的图和留下的图都只存在于后端，
+        // 浏览器带回来的链接一律不作为建单依据。
+        create.setImageUrls(workOrderWorkflowRunner.workOrderImages(command.getConversationId()));
         // 归档信息由服务端从这次对话取，不信浏览器自报的两个值
         create.setAiConversationId(command.getConversationId());
         create.setAiSelectedOptionId(selfResolved ? null : command.getUserSelect());

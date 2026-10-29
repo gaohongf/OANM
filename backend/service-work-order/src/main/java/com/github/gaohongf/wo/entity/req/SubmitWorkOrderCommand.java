@@ -1,5 +1,6 @@
 package com.github.gaohongf.wo.entity.req;
 
+import java.util.List;
 import java.util.Optional;
 
 import org.hibernate.validator.constraints.Length;
@@ -63,6 +64,15 @@ public class SubmitWorkOrderCommand {
      */
     @Length(max = 16000, message = BaseValidationRsm.ORG_HIBERNATE_VALIDATOR_CONSTRAINTS_LENGTH_MESSAGE)
     private String originalProblemDescription;
+
+    /**
+     * 现场图片链接，可为空。
+     * <p>
+     * 通常是 AI 从对话里筛出来的有效图片，也可以由调用方直接给出。
+     * 只接受上传接口返回的相对地址（{@code /file/...}）或 http(s) 链接，
+     * 逐项校验见 {@code WorkOrderServiceImpl#normalizeImageUrls}。
+     */
+    private List<String> imageUrls;
 
     /**
      * 是否为自助解决记录。

@@ -1,5 +1,7 @@
 package com.github.gaohongf.wo.entity.res;
 
+import java.util.List;
+
 import lombok.Data;
 import lombok.EqualsAndHashCode;
 
@@ -26,6 +28,14 @@ public class WorkOrderDetailRes extends WorkOrderRes {
 
     /** 用户在意图推断里选中的选项 id；手工建单和自助解决记录为 null */
     private Integer aiSelectedOptionId;
+
+    /**
+     * 现场图片链接。
+     * <p>
+     * 库里是"一行一个"的文本（见 {@code WorkOrderEntity#imageUrls}），这里拆成数组，
+     * 前端不必再关心存储格式。没有图片时是空数组而不是 null。
+     */
+    private List<String> imageUrls;
 
     /**
      * 受理人结单时填写的本次心得，没有填时为 {@code null}。

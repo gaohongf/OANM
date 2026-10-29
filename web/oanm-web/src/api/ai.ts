@@ -180,6 +180,13 @@ export interface WorkOrderDraft {
   type: string
   priority: string
   problemDescription: string
+  /**
+   * 会被带到工单上的现场图片。
+   *
+   * 由后端识图节点筛过：表情包和与问题无关的图不会出现在这里。
+   * 只用于提交前预览；真正建单时服务端会再从会话状态里取一次。
+   */
+  imageUrls: string[]
 }
 
 /**
@@ -204,7 +211,19 @@ export function readWorkOrderDraft(value: unknown): WorkOrderDraft | null {
     type: toText(parsed.type) ?? '',
     priority: toText(parsed.priority) ?? '',
     problemDescription,
+    imageUrls: toStringList(parsed.imageUrls),
   }
+}
+
+/** 图片链接数组的宽松解析：只留下非空字符串，其余一律丢掉。 */
+function toStringList(value: unknown): string[] {
+  if (!Array.isArray(value)) {
+    return []
+  }
+  return value
+    .map((item) => toText(item))
+    .filter((item): item is string => item !== null && item.trim() !== '')
+    .map((item) => item.trim())
 }
 
 // ---- 流式调用 ----

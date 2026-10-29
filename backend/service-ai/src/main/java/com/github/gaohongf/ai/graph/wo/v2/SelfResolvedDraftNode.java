@@ -1,5 +1,6 @@
 package com.github.gaohongf.ai.graph.wo.v2;
 
+import java.util.List;
 import java.util.Map;
 
 import org.springframework.ai.chat.client.ChatClient;
@@ -60,6 +61,13 @@ public class SelfResolvedDraftNode extends AINode {
         if (draft == null) {
             throw new RequestException("模型没有返回自助解决记录");
         }
+        // 自助解决记录同样保留对话里筛出的现场图片，供用户提交前确认
+        draft.setImageUrls(state.value("workOrderImages", List.class)
+                .map(items -> items.stream()
+                        .filter(String.class::isInstance)
+                        .map(String.class::cast)
+                        .toList())
+                .orElse(List.of()));
         return Map.of("workOrderDraft", Flux.just(draft));
     }
 }
