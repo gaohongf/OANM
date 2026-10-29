@@ -19,7 +19,6 @@ import {
   FileAddOutlined,
   PictureOutlined,
   ReloadOutlined,
-  RobotOutlined,
   SendOutlined,
 } from '@ant-design/icons'
 import { useNavigate } from 'react-router'
@@ -44,7 +43,7 @@ import { IMAGE_MAX_BYTES, uploadFile } from '../../api/files'
 import type { UploadedFile } from '../../api/files'
 import { useAuthStore } from '../../store/auth'
 import type { MenuNode } from '../../types/api'
-import { ChatBubble } from './components/ChatBubble'
+import { AI_AVATAR, ChatBubble } from './components/ChatBubble'
 import type { BubbleContent, SolutionSteps } from './components/ChatBubble'
 import { WorkOrderDraftDrawer } from './components/WorkOrderDraftDrawer'
 import type { WorkOrderFormValues } from './components/WorkOrderDraftDrawer'
@@ -990,12 +989,8 @@ export default function IntentInference() {
             <Flex gap={12} align="flex-start">
               <Avatar
                 size={40}
-                icon={<RobotOutlined />}
-                style={{
-                  flexShrink: 0,
-                  background: token.colorPrimary,
-                  color: token.colorTextLightSolid,
-                }}
+                src={AI_AVATAR}
+                style={{ flexShrink: 0 }}
               />
               <div style={{ minWidth: 0 }}>
                 <Text strong style={{ fontSize: token.fontSizeLG }}>

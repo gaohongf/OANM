@@ -2,7 +2,7 @@ import { useState } from 'react'
 
 import { Alert, Avatar, Button, Image, Space, Tag, Typography, theme } from 'antd'
 import type { GlobalToken } from 'antd'
-import { ExclamationCircleOutlined, RobotOutlined, UserOutlined } from '@ant-design/icons'
+import { ExclamationCircleOutlined, UserOutlined } from '@ant-design/icons'
 
 import type { IntentOption, KnowledgeSource, WorkOrderDraft } from '../../../api/ai'
 import type { UploadedFile } from '../../../api/files'
@@ -13,6 +13,9 @@ const { Text, Link } = Typography
 
 /** 少于这个步数不折叠 —— 三四步本来就放得下，藏起来只多一次点击 */
 const COLLAPSE_THRESHOLD = 4
+
+/** AI 助手头像。文件在 public/ 下，构建后按站点根路径直接访问。 */
+export const AI_AVATAR = '/ai-avatar.png'
 
 /**
  * 自助解决步骤。
@@ -145,13 +148,15 @@ export function ChatBubble({ role, content, tag, continuation = false }: ChatBub
     >
       <Avatar
         size={32}
-        icon={isUser ? <UserOutlined /> : <RobotOutlined />}
+        // AI 用固定头像；用户的仍是通用图标 + 主题色底
+        src={isUser ? undefined : AI_AVATAR}
+        icon={isUser ? <UserOutlined /> : undefined}
         style={{
           flexShrink: 0,
           // 连着说的下一条只占位不画头像，气泡才和上一条左对齐
           visibility: continuation ? 'hidden' : undefined,
-          background: isUser ? token.colorPrimary : token.colorFillSecondary,
-          color: isUser ? token.colorTextLightSolid : token.colorTextSecondary,
+          background: isUser ? token.colorPrimary : undefined,
+          color: isUser ? token.colorTextLightSolid : undefined,
         }}
       />
       <div style={{ maxWidth: wide ? '88%' : '76%', minWidth: 0 }}>
