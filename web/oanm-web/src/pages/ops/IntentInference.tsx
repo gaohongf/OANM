@@ -1,4 +1,12 @@
-import { Fragment, useCallback, useEffect, useMemo, useRef, useState } from 'react'
+import {
+  Fragment,
+  useCallback,
+  useEffect,
+  useMemo,
+  useRef,
+  useState,
+  useSyncExternalStore,
+} from 'react'
 import type { ChangeEvent } from 'react'
 import {
   App as AntdApp,
@@ -73,6 +81,62 @@ const PROBE_HINT = '点最接近的一项；都不是就在下面说说实际看
 
 /** 自助步骤折叠后保留几步：手机上一屏够读完 */
 const COLLAPSED_STEPS = 2
+
+/** 窄屏断点，与布局层的 md（768）一致：小于它按手机处理 */
+const NARROW_QUERY = '(max-width: 767px)'
+
+/**
+ * 订阅窄屏状态。
+ *
+ * 用 matchMedia 而不是 antd 的 Grid.useBreakpoint：这里只需要一个布尔量，
+ * matchMedia 首帧就能给出正确值，不会先按窄屏渲染一帧再切回来。
+ */
+function subscribeNarrow(onChange: () => void) {
+  const query = window.matchMedia(NARROW_QUERY)
+  query.addEventListener('change', onChange)
+  return () => query.removeEventListener('change', onChange)
+}
+
+function getNarrow(): boolean {
+  return window.matchMedia(NARROW_QUERY).matches
+}
+
+/**
+ * 输入框的占位文案。
+ *
+ * 窄屏必须用短句：TextArea 开着 autoSize，而它在内容为空时按
+ * `value || placeholder` 量高度（见 @rc-component/input 的 calculateNodeHeight），
+ * 手机上一句长提示会把本该一行的输入框撑成好几行的大方块。
+ */
+function composerPlaceholder(state: {
+  narrow: boolean
+  sessionEnded: boolean
+  selfServiceDone: boolean
+  submitted: boolean
+  isFirst: boolean
+  deciding: boolean
+  asking: boolean
+}): string {
+  if (state.sessionEnded) {
+    return state.narrow ? '会话已结束' : '本次会话已结束，请点右上角「重新开始」'
+  }
+  if (state.selfServiceDone) {
+    return state.narrow ? '记录已生成' : '自助解决记录已生成，可在上面的卡片里查看并提交'
+  }
+  if (state.submitted) {
+    return state.narrow ? '工单已创建' : '工单已创建，如需再次提单请点右上角「重新开始」'
+  }
+  if (state.isFirst) {
+    return state.narrow ? '描述遇到的问题' : '例如：财务系统导出报表时一直转圈'
+  }
+  if (state.deciding) {
+    return state.narrow ? '回复是否已解决' : '也可以直接回复：已经解决了 / 帮我提工单'
+  }
+  if (state.asking) {
+    return state.narrow ? '回答上面的问题' : '回答它上面的问题，比如：昨天上午，行政楼'
+  }
+  return state.narrow ? '补充细节…' : '补充一些细节，比如：昨天升级之后才开始的'
+}
 
 /** 知识库浏览页的路径。出处链接跳到它的 `?openId=` 入口 */
 const KNOWLEDGE_PATH = '/knowledge'
@@ -198,6 +262,8 @@ export default function IntentInference() {
   const { message } = AntdApp.useApp()
   const { token } = theme.useToken()
   const navigate = useNavigate()
+  // 手机上的输入区要更紧凑：短占位文案、图标按钮，避免输入框被撑成大方块
+  const narrow = useSyncExternalStore(subscribeNarrow, getNarrow, () => false)
   // 没有知识库菜单（或没有读权限）时，出处的标题照样显示，但点不进去
   const menus = useAuthStore((state) => state.menus)
   const canOpenKnowledge = useMemo(() => hasPagePath(menus, KNOWLEDGE_PATH), [menus])
@@ -697,6 +763,8 @@ export default function IntentInference() {
   const asking = activeRound?.mode === 'ask'
   /** 当前这一轮在等用户回答"自助有没有用"：卡片能点，也可以直接说 */
   const deciding = activeRound?.mode === 'decision'
+  /** 发送按钮的文案；窄屏只留图标，这段仍作为无障碍名称 */
+  const sendLabel = isFirst ? '开始分析' : asking ? '提交回答' : '继续分析'
   const selectedHere =
     draft.selected !== null && draft.selected.roundIndex === activeIndex
       ? draft.selected.option
@@ -1207,27 +1275,22 @@ export default function IntentInference() {
             上下 8 + 一行文字 22 + 边框 2 = 40，正好等于右侧 size="large" 的按钮。 */}
         <div style={{ position: 'relative', flex: 1, minWidth: 0, display: 'flex' }}>
           <TextArea
-            // 右边留出 78px 给字数（最长的 "2000/2000" 约 60px + 12px 间距），文字不会跑到它底下
-            style={{ padding: '8px 78px 8px 12px' }}
+            // 宽屏右边留出 78px 给字数（最长的 "2000/2000" 约 60px + 12px 间距）；
+            // 窄屏不显示字数，省下的宽度留给输入框本身
+            style={{ padding: narrow ? '8px 12px' : '8px 78px 8px 12px' }}
             value={composerValue}
             onChange={(event) => setComposerValue(event.target.value)}
-            placeholder={
-              sessionEnded
-                ? '本次会话已结束，请点右上角「重新开始」'
-                : selfServiceDone
-                  ? '自助解决记录已生成，可在上面的卡片里查看并提交'
-                  : submitted
-                    ? '工单已创建，如需再次提单请点右上角「重新开始」'
-                    : isFirst
-                    ? '例如：财务系统导出报表时一直转圈'
-                    : deciding
-                      ? '也可以直接回复：已经解决了 / 帮我提工单'
-                      : asking
-                        ? '回答它上面的问题，比如：昨天上午，行政楼'
-                        : '补充一些细节，比如：昨天升级之后才开始的'
-            }
-            // 单行起步，写长了自动长高（最多 6 行）
-            autoSize={{ minRows: 1, maxRows: 6 }}
+            placeholder={composerPlaceholder({
+              narrow,
+              sessionEnded,
+              selfServiceDone,
+              submitted,
+              isFirst,
+              deciding,
+              asking,
+            })}
+            // 单行起步，写长了自动长高；手机上限更低，别让输入框吃掉半个屏幕
+            autoSize={{ minRows: 1, maxRows: narrow ? 4 : 6 }}
             maxLength={2000}
             disabled={busy || submitted || sessionEnded || selfServiceDone}
             // 回车即发送，换行用 Shift+Enter —— 聊天框的默认手势。
@@ -1240,20 +1303,22 @@ export default function IntentInference() {
               onSend()
             }}
           />
-          <Text
-            type="secondary"
-            style={{
-              position: 'absolute',
-              right: 12,
-              bottom: 8,
-              fontSize: token.fontSizeSM,
-              lineHeight: '22px',
-              whiteSpace: 'nowrap',
-              pointerEvents: 'none',
-            }}
-          >
-            {composerValue.length}/2000
-          </Text>
+          {!narrow && (
+            <Text
+              type="secondary"
+              style={{
+                position: 'absolute',
+                right: 12,
+                bottom: 8,
+                fontSize: token.fontSizeSM,
+                lineHeight: '22px',
+                whiteSpace: 'nowrap',
+                pointerEvents: 'none',
+              }}
+            >
+              {composerValue.length}/2000
+            </Text>
+          )}
         </div>
 
         <Space size={8} style={{ flexShrink: 0 }}>
@@ -1282,8 +1347,9 @@ export default function IntentInference() {
             loading={streaming}
             disabled={!canSend}
             onClick={onSend}
+            aria-label={sendLabel}
           >
-            {isFirst ? '开始分析' : asking ? '提交回答' : '继续分析'}
+            {narrow ? null : sendLabel}
           </Button>
         </Space>
       </Flex>
